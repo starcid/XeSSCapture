@@ -1,0 +1,38 @@
+//------------------------------------------------------------------------------
+// Style transform for UE4 Plugin
+//------------------------------------------------------------------------------
+
+#include "/Engine/Private/Common.ush"
+
+// =====================================================================================
+//
+// SHADER RESOURCES
+//
+// =====================================================================================
+// Temporal jitter at the pixel scale.
+float2 TemporalJitterPixels;
+RWTexture2D<float4> OutputTexture;
+
+// =====================================================================================
+//
+// ENTRY POINTS
+//
+// =====================================================================================
+[numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
+void MainCS(uint3 LocalThreadId : SV_GroupThreadID, uint3 WorkGroupId : SV_GroupID, uint3 Dtid : SV_DispatchThreadID)
+{
+	uint2 st = Dtid.xy;
+	float4 OutputColor;
+
+	float2 encodedSample = abs(TemporalJitterPixels);
+	OutputColor.a = 1.0;
+	OutputColor.r = encodedSample.x;
+	OutputColor.g = encodedSample.y;
+
+	int code0 = TemporalJitterPixels.x < 0.f ? 1 : 0;
+	int code1 = TemporalJitterPixels.y < 0.f ? 1 : 0;
+   	int code = code0 + code1 * 2;
+	OutputColor.b = code;
+
+	OutputTexture[st] = OutputColor;
+}
