@@ -41,6 +41,12 @@ static TAutoConsoleVariable<float> CVarXeSSCaptureFixedFrameRate(
 	TEXT("The fixed frame rate which is used to capture."),
 	ECVF_RenderThreadSafe);
 
+static TAutoConsoleVariable<float> CVarXeSSCaptureScreenPercentage(
+	TEXT("r.XeSSCapture.ScreenPercentage"),
+	50.0f,
+	TEXT("The screen percentage which is used to capture."),
+	ECVF_RenderThreadSafe);
+
 static TAutoConsoleVariable<FString> CVarXeSSCaptureOutputDir(
 	TEXT("r.XeSSCapture.OutputDirectory"),
 	TEXT("D:\\XeSSCapture\\"),
@@ -224,7 +230,7 @@ void FXeSSCaptureModule::OnBeginFrame()
 				OverrideCommands(TEXT("r.TemporalAAFilterSize"), 1);
 				OverrideCommands(TEXT("r.TemporalAA.Upsampling"), 1);
 				OverrideCommands(TEXT("r.TemporalAASamples"), 8);
-				OverrideCommandsFloat(TEXT("r.ScreenPercentage"), 50.0f);
+				OverrideCommandsFloat(TEXT("r.ScreenPercentage"), CVarXeSSCaptureScreenPercentage.GetValueOnGameThread());
 
 				m_pReservedTemporalUpscaler = GTemporalUpscaler;
 			}

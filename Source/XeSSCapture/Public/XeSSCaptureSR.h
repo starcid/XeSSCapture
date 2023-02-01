@@ -7,5 +7,4 @@ public:
 
 protected:
 	static void SaveSampleToJson(const FString& fileName, float sampleX, float sampleY);
-	static void CaptureSample();
 };

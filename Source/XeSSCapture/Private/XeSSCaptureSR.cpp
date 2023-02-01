@@ -1,4 +1,5 @@
 #include "XeSSCaptureSR.h"
+#include "XeSSCapture.h"
 
 #include "Engine/Engine.h"
 #include "CanvasTypes.h"
@@ -42,48 +43,59 @@ static TAutoConsoleVariable<int32> CVarXeSSCaptureSampleIndex(
 	TEXT("The sample index of this XeSS SR capture."),
 	ECVF_RenderThreadSafe);
 
+static void CaptureSample(UTextureRenderTarget2D* CaptureRenderTexture, FIntPoint& TargetSize, UWorld* World, ULocalPlayer* LP)
+{
+	FTextureRenderTargetResource* RenderTargetResource = CaptureRenderTexture->GameThread_GetRenderTargetResource();
+
+	FSceneViewFamilyContext ViewFamily(FSceneViewFamily::ConstructionValues(
+		RenderTargetResource,
+		World->Scene,
+		FEngineShowFlags(ESFIM_Game))
+		.SetRealtimeUpdate(true));
+
+	ViewFamily.EngineShowFlags.ScreenPercentage = true;
+	ViewFamily.SetScreenPercentageInterface(new FLegacyScreenPercentageDriver(ViewFamily, FLegacyScreenPercentageDriver::GetCVarResolutionFraction(), true));
+
+	ViewFamily.ViewExtensions = GEngine->ViewExtensions->GatherActiveExtensions(FSceneViewExtensionContext(World->Scene));
+	for (auto ViewExt : ViewFamily.ViewExtensions)
+	{
+		ViewExt->SetupViewFamily(ViewFamily);
+	}
+
+	FSceneViewInitOptions ViewInitOptions;
+
+	if (!LP->CalcSceneViewInitOptions(ViewInitOptions, LP->ViewportClient->Viewport, nullptr, eSSP_FULL))
+	{
+		return;
+	}
+	ViewInitOptions.SetViewRectangle(FIntRect(0, 0, TargetSize.X, TargetSize.Y));
+	ViewInitOptions.ViewFamily = &ViewFamily;
+
+	// get the projection data
+	FSceneViewProjectionData ProjectionData;
+	if (!LP->GetProjectionData(LP->ViewportClient->Viewport, eSSP_FULL, /*out*/ ProjectionData))
+	{
+		return;
+	}
+	ViewInitOptions.ViewOrigin = ProjectionData.ViewOrigin;
+	ViewInitOptions.ViewRotationMatrix = ProjectionData.ViewRotationMatrix;
+	ViewInitOptions.ProjectionMatrix = ProjectionData.ProjectionMatrix;
+
+	FSceneView* NewView = new FSceneView(ViewInitOptions);
+
+	ViewFamily.Views.Add(NewView);
+	for (int ViewExt = 0; ViewExt < ViewFamily.ViewExtensions.Num(); ViewExt++)
+	{
+		ViewFamily.ViewExtensions[ViewExt]->SetupView(ViewFamily, *NewView);
+	}
+
+	FCanvas Canvas(RenderTargetResource, NULL, World, World->Scene->GetFeatureLevel());
+	Canvas.Clear(FLinearColor::Transparent);
+	GetRendererModule().BeginRenderingViewFamily(&Canvas, &ViewFamily);
+	FlushRenderingCommands();
+}
+
 void XeSSCaptureSR::Capture()
-{
-	CVarTemporalAASampleOverride->Set(1);
-
-	for (int i = 0; i < 256; i++)
-	{
-		static const auto OutputDirectory = IConsoleManager::Get().FindConsoleVariable(TEXT("r.XeSSCapture.OutputDirectory"));
-		static const auto DateTime = IConsoleManager::Get().FindConsoleVariable(TEXT("r.XeSSCapture.DateTime"));
-		static const auto FrameIndex = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.XeSSCapture.FrameIndex"));
-
-		if (FrameIndex->GetValueOnGameThread() == 0)
-		{
-			SaveSampleToJson(FString::Printf(TEXT("%s\\%s\\sr\\samples\\srsample_%d.json"), *OutputDirectory->GetString(), *DateTime->GetString(), i), samples_256[i][0], samples_256[i][1]);
-		}
-
-		CVarXeSSCaptureSampleIndex->Set(i);
-		CVarTemporalAASampleOverrideX->Set(samples_256[i][0]);
-		CVarTemporalAASampleOverrideY->Set(samples_256[i][1]);
-
-		CaptureSample();
-	}
-
-	CVarTemporalAASampleOverride->Set(0);
-}
-
-void XeSSCaptureSR::SaveSampleToJson(const FString& fileName, float sampleX, float sampleY)
-{
-	TSharedRef<FJsonObject> RootObject = MakeShareable(new FJsonObject);
-
-	RootObject->SetNumberField(TEXT("jitterX"), sampleX);
-	RootObject->SetNumberField(TEXT("jitterY"), sampleY);
-
-	//Write the json file
-	FString Json;
-	TSharedRef<TJsonWriter<> > JsonWriter = TJsonWriterFactory<>::Create(&Json, 0);
-	if (FJsonSerializer::Serialize(RootObject, JsonWriter))
-	{
-		FFileHelper::SaveStringToFile(Json, *fileName);
-	}
-}
-
-void XeSSCaptureSR::CaptureSample()
 {
 	FWorldContext* world = GEngine->GetWorldContextFromGameViewport(GEngine->GameViewport);
 	UWorld* World = world->World();
@@ -106,7 +118,11 @@ void XeSSCaptureSR::CaptureSample()
 	if (!LP || !LP->ViewportClient)
 		return;
 
+#if WITH_EDITOR
 	FIntPoint TargetSize = SceneViewPort->GetSize();
+#else
+	FIntPoint TargetSize = FIntPoint(GSystemResolution.ResX, GSystemResolution.ResY);
+#endif
 
 	UTextureRenderTarget2D* CaptureRenderTexture = NewObject<UTextureRenderTarget2D>();
 	CaptureRenderTexture->AddToRoot();
@@ -114,59 +130,44 @@ void XeSSCaptureSR::CaptureSample()
 	CaptureRenderTexture->TargetGamma = 1.0;
 	CaptureRenderTexture->InitCustomFormat(TargetSize.X, TargetSize.Y, PF_B8G8R8A8, false);
 
-	FTextureRenderTargetResource* RenderTargetResource = CaptureRenderTexture->GameThread_GetRenderTargetResource();
+	CVarTemporalAASampleOverride->Set(1);
 
-	FSceneViewFamilyContext ViewFamily(FSceneViewFamily::ConstructionValues(
-		RenderTargetResource,
-		World->Scene,
-		FEngineShowFlags(ESFIM_Game))
-		.SetRealtimeUpdate(true));
-
-	ViewFamily.EngineShowFlags.ScreenPercentage = true;
-	ViewFamily.SetScreenPercentageInterface(new FLegacyScreenPercentageDriver(ViewFamily, FLegacyScreenPercentageDriver::GetCVarResolutionFraction(), true));
-
-	ViewFamily.ViewExtensions = GEngine->ViewExtensions->GatherActiveExtensions(FSceneViewExtensionContext(World->Scene));
-	for (auto ViewExt : ViewFamily.ViewExtensions)
+	for (int i = 0; i < 256; i++)
 	{
-		ViewExt->SetupViewFamily(ViewFamily);
+		static const auto OutputDirectory = IConsoleManager::Get().FindConsoleVariable(TEXT("r.XeSSCapture.OutputDirectory"));
+		static const auto DateTime = IConsoleManager::Get().FindConsoleVariable(TEXT("r.XeSSCapture.DateTime"));
+		static const auto FrameIndex = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.XeSSCapture.FrameIndex"));
+
+		if (FrameIndex->GetValueOnGameThread() == 0)
+		{
+			SaveSampleToJson(FString::Printf(TEXT("%s\\%s\\sr\\samples\\srsample_%d.json"), *OutputDirectory->GetString(), *DateTime->GetString(), i), samples_256[i][0], samples_256[i][1]);
+		}
+
+		CVarXeSSCaptureSampleIndex->Set(i);
+		CVarTemporalAASampleOverrideX->Set(samples_256[i][0]);
+		CVarTemporalAASampleOverrideY->Set(samples_256[i][1]);
+
+		CaptureSample(CaptureRenderTexture, TargetSize, World, LP);
 	}
 
-	FSceneViewInitOptions ViewInitOptions;
-
-	if (!LP->CalcSceneViewInitOptions(ViewInitOptions, LP->ViewportClient->Viewport, nullptr, eSSP_FULL))
-	{
-		CaptureRenderTexture->RemoveFromRoot();
-		CaptureRenderTexture = nullptr;
-		return;
-	}
-	ViewInitOptions.SetViewRectangle(FIntRect(0, 0, TargetSize.X, TargetSize.Y));
-	ViewInitOptions.ViewFamily = &ViewFamily;
-
-	// get the projection data
-	FSceneViewProjectionData ProjectionData;
-	if (!LP->GetProjectionData(LP->ViewportClient->Viewport, eSSP_FULL, /*out*/ ProjectionData))
-	{
-		CaptureRenderTexture->RemoveFromRoot();
-		CaptureRenderTexture = nullptr;
-		return;
-	}
-	ViewInitOptions.ViewOrigin = ProjectionData.ViewOrigin;
-	ViewInitOptions.ViewRotationMatrix = ProjectionData.ViewRotationMatrix;
-	ViewInitOptions.ProjectionMatrix = ProjectionData.ProjectionMatrix;
-	
-	FSceneView* NewView = new FSceneView(ViewInitOptions);
-
-	ViewFamily.Views.Add(NewView);
-	for (int ViewExt = 0; ViewExt < ViewFamily.ViewExtensions.Num(); ViewExt++)
-	{
-		ViewFamily.ViewExtensions[ViewExt]->SetupView(ViewFamily, *NewView);
-	}
-
-	FCanvas Canvas(RenderTargetResource, NULL, World, World->Scene->GetFeatureLevel());
-	Canvas.Clear(FLinearColor::Transparent);
-	GetRendererModule().BeginRenderingViewFamily(&Canvas, &ViewFamily);
-	FlushRenderingCommands();
+	CVarTemporalAASampleOverride->Set(0);
 
 	CaptureRenderTexture->RemoveFromRoot();
 	CaptureRenderTexture = nullptr;
+}
+
+void XeSSCaptureSR::SaveSampleToJson(const FString& fileName, float sampleX, float sampleY)
+{
+	TSharedRef<FJsonObject> RootObject = MakeShareable(new FJsonObject);
+
+	RootObject->SetNumberField(TEXT("jitterX"), sampleX);
+	RootObject->SetNumberField(TEXT("jitterY"), sampleY);
+
+	//Write the json file
+	FString Json;
+	TSharedRef<TJsonWriter<> > JsonWriter = TJsonWriterFactory<>::Create(&Json, 0);
+	if (FJsonSerializer::Serialize(RootObject, JsonWriter))
+	{
+		FFileHelper::SaveStringToFile(Json, *fileName);
+	}
 }

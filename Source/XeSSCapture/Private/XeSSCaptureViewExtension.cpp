@@ -8,14 +8,9 @@ void FXeSSCaptureViewExtension::SetupViewFamily(FSceneViewFamily& InViewFamily)
 {
 	if (m_bActive)
 	{
-		if (m_bCaptureSR)
-		{
-
-		}
-		else
-		{
-
-		}
+		InViewFamily.EngineShowFlags.Particles = 0;
+		InViewFamily.EngineShowFlags.Fog = 0;
+		InViewFamily.EngineShowFlags.VolumetricFog = 0;
 	}
 }
 
