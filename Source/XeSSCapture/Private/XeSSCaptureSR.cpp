@@ -43,7 +43,7 @@ static TAutoConsoleVariable<int32> CVarXeSSCaptureSampleIndex(
 	TEXT("The sample index of this XeSS SR capture."),
 	ECVF_RenderThreadSafe);
 
-static void CaptureSample(UTextureRenderTarget2D* CaptureRenderTexture, FIntPoint& TargetSize, UWorld* World, ULocalPlayer* LP)
+static void CaptureSample(UTextureRenderTarget2D* CaptureRenderTexture, FIntPoint& TargetSize, UWorld* World, ULocalPlayer* LP, FSceneViewProjectionData& ProjectionData)
 {
 	FTextureRenderTargetResource* RenderTargetResource = CaptureRenderTexture->GameThread_GetRenderTargetResource();
 
@@ -70,13 +70,6 @@ static void CaptureSample(UTextureRenderTarget2D* CaptureRenderTexture, FIntPoin
 	}
 	ViewInitOptions.SetViewRectangle(FIntRect(0, 0, TargetSize.X, TargetSize.Y));
 	ViewInitOptions.ViewFamily = &ViewFamily;
-
-	// get the projection data
-	FSceneViewProjectionData ProjectionData;
-	if (!LP->GetProjectionData(LP->ViewportClient->Viewport, eSSP_FULL, /*out*/ ProjectionData))
-	{
-		return;
-	}
 	ViewInitOptions.ViewOrigin = ProjectionData.ViewOrigin;
 	ViewInitOptions.ViewRotationMatrix = ProjectionData.ViewRotationMatrix;
 	ViewInitOptions.ProjectionMatrix = ProjectionData.ProjectionMatrix;
@@ -118,8 +111,13 @@ void XeSSCaptureSR::Capture()
 	if (!LP || !LP->ViewportClient)
 		return;
 
+	// get the projection data
+	FSceneViewProjectionData ProjectionData;
+	if (!LP->GetProjectionData(LP->ViewportClient->Viewport, eSSP_FULL, /*out*/ ProjectionData))
+		return;
+
 #if WITH_EDITOR
-	FIntPoint TargetSize = SceneViewPort->GetSize();
+	FIntPoint TargetSize = ProjectionData.GetConstrainedViewRect().Size();
 #else
 	FIntPoint TargetSize = FIntPoint(GSystemResolution.ResX, GSystemResolution.ResY);
 #endif
@@ -147,7 +145,7 @@ void XeSSCaptureSR::Capture()
 		CVarTemporalAASampleOverrideX->Set(samples_256[i][0]);
 		CVarTemporalAASampleOverrideY->Set(samples_256[i][1]);
 
-		CaptureSample(CaptureRenderTexture, TargetSize, World, LP);
+		CaptureSample(CaptureRenderTexture, TargetSize, World, LP, ProjectionData);
 	}
 
 	CVarTemporalAASampleOverride->Set(0);
