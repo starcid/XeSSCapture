@@ -1253,20 +1253,29 @@ ITemporalUpscaler::FOutputs FXeSSVelocityTemporalUpscaler::AddPasses(
 
 	// color
 	FScreenPassTexture SceneColor(PassInputs.SceneColorTexture, FirstViewRect);
-	AddDumpToExrPass(GraphBuilder, SceneColor, FString::Printf(TEXT("%s\\%s\\color\\color_%d.exr"), *OutputDirectory->GetString(), *DateTime->GetString(), FrameIndex->GetValueOnRenderThread()));
+	if (FrameIndex->GetValueOnRenderThread() >= 0)
+	{
+		AddDumpToExrPass(GraphBuilder, SceneColor, FString::Printf(TEXT("%s\\%s\\color\\color_%d.exr"), *OutputDirectory->GetString(), *DateTime->GetString(), FrameIndex->GetValueOnRenderThread()));
+	}
 
 	// sampler
 	const FRDGTextureRef XeSSSampler = AddSamplePass(GraphBuilder, View);
-	FScreenPassTexture SceneSampler(XeSSSampler, FirstViewRect);
-	AddDumpToExrPass(GraphBuilder, SceneSampler, FString::Printf(TEXT("%s\\%s\\sample\\sample_%d.exr"), *OutputDirectory->GetString(), *DateTime->GetString(), FrameIndex->GetValueOnRenderThread()));
+	if (FrameIndex->GetValueOnRenderThread() >= 0)
+	{
+		FScreenPassTexture SceneSampler(XeSSSampler, FirstViewRect);
+		AddDumpToExrPass(GraphBuilder, SceneSampler, FString::Printf(TEXT("%s\\%s\\sample\\sample_%d.exr"), *OutputDirectory->GetString(), *DateTime->GetString(), FrameIndex->GetValueOnRenderThread()));
+	}
 
 	// velocity
 	const FRDGTextureRef XeSSUpscaledVelocity = AddVelocityFlatteningXeSSPass(GraphBuilder,
 		PassInputs.SceneDepthTexture,
 		PassInputs.SceneVelocityTexture,
 		View);
-	FScreenPassTexture SceneVelocity(XeSSUpscaledVelocity, SecondaryViewRect);
-	AddDumpToExrPass(GraphBuilder, SceneVelocity, FString::Printf(TEXT("%s\\%s\\velocity\\velocity_%d.exr"), *OutputDirectory->GetString(), *DateTime->GetString(), FrameIndex->GetValueOnRenderThread()));
+	if (FrameIndex->GetValueOnRenderThread() >= 0)
+	{
+		FScreenPassTexture SceneVelocity(XeSSUpscaledVelocity, SecondaryViewRect);
+		AddDumpToExrPass(GraphBuilder, SceneVelocity, FString::Printf(TEXT("%s\\%s\\velocity\\velocity_%d.exr"), *OutputDirectory->GetString(), *DateTime->GetString(), FrameIndex->GetValueOnRenderThread()));
+	}
 
 #if ENGINE_MAJOR_VERSION < 5
 	ITemporalUpscaler::GetDefaultTemporalUpscaler()->AddPasses(GraphBuilder, View, PassInputs, OutSceneColorTexture, OutSceneColorViewRect, OutSceneColorHalfResTexture, OutSceneColorHalfResViewRect);
@@ -1307,8 +1316,11 @@ ITemporalUpscaler::FOutputs FXeSSVelocityTemporalUpscaler::AddPasses(
 
 	// sr
 	AddSrMainTemporalAAPasses(GraphBuilder, View, PassInputs, OutSceneColorTexture, OutSceneColorViewRect, OutSceneColorHalfResTexture, OutSceneColorHalfResViewRect);
-	FScreenPassTexture SceneSr(*OutSceneColorTexture, SecondaryViewRect);
-	AddDumpToExrPass(GraphBuilder, SceneSr, FString::Printf(TEXT("%s\\%s\\sr\\%d\\sr_%d.exr"), *OutputDirectory->GetString(), *DateTime->GetString(), FrameIndex->GetValueOnRenderThread(), SampleIndex->GetValueOnRenderThread()));
+	if (FrameIndex->GetValueOnRenderThread() >= 0)
+	{
+		FScreenPassTexture SceneSr(*OutSceneColorTexture, SecondaryViewRect);
+		AddDumpToExrPass(GraphBuilder, SceneSr, FString::Printf(TEXT("%s\\%s\\sr\\%d\\sr_%d.exr"), *OutputDirectory->GetString(), *DateTime->GetString(), FrameIndex->GetValueOnRenderThread(), SampleIndex->GetValueOnRenderThread()));
+	}
 
 #if ENGINE_MAJOR_VERSION < 5
 #else

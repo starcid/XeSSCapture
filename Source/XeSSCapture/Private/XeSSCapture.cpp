@@ -180,9 +180,6 @@ void FXeSSCaptureModule::OnBeginFrame()
 				TStringBuilder<32> DateTimeStringBuilder;
 				DateTimeStringBuilder << FDateTime::Now().ToString();
 				CVarXeSSCaptureDateTime->Set(DateTimeStringBuilder.GetData());
-				PXeSSCaptureViewExtension->SetActive(true);
-				XeSSCaptureFrameIndex = 0;
-				CVarXeSSCaptureFrameIndex->Set(XeSSCaptureFrameIndex);
 
 				// save previous frame settings
 				m_bReservedSmoothFrameRate = GEngine->bSmoothFrameRate;
@@ -233,6 +230,13 @@ void FXeSSCaptureModule::OnBeginFrame()
 				OverrideCommandsFloat(TEXT("r.ScreenPercentage"), CVarXeSSCaptureScreenPercentage.GetValueOnGameThread());
 
 				m_pReservedTemporalUpscaler = GTemporalUpscaler;
+
+				// add one frame to skip
+				CaptureFrameCount++;
+				XeSSCaptureFrameIndex = -1;
+				CVarXeSSCaptureFrameIndex->Set(XeSSCaptureFrameIndex);
+
+				PXeSSCaptureViewExtension->SetActive(true);
 			}
 		}
 	}
