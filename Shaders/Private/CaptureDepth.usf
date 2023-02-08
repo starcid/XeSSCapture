@@ -1,5 +1,5 @@
 //------------------------------------------------------------------------------
-// Capture Sample for UE4 XeSS Capture Plugin
+// Capture Depth for UE4 XeSS Capture Plugin
 //------------------------------------------------------------------------------
 
 #include "/Engine/Private/Common.ush"
@@ -9,9 +9,21 @@
 // SHADER RESOURCES
 //
 // =====================================================================================
+
+Texture2D SceneDepthTexture;
+
+float2 InputViewMin;
+float4 InputViewSize;
 // Temporal jitter at the pixel scale.
 float2 TemporalJitterPixels;
+
 RWTexture2D<float4> OutputTexture;
+
+//------------------------------------------------------- HELPER FUNCTIONS
+float LoadSceneDepthTexture(int2 PixelPos, int2 Offset)
+{
+	return SceneDepthTexture.Load(int3(PixelPos + Offset, 0)).r;
+}
 
 // =====================================================================================
 //
@@ -21,17 +33,18 @@ RWTexture2D<float4> OutputTexture;
 [numthreads(THREADGROUP_SIZEX, THREADGROUP_SIZEY, 1)]
 void MainCS(uint3 LocalThreadId : SV_GroupThreadID, uint3 WorkGroupId : SV_GroupID, uint2 Dtid : SV_DispatchThreadID)
 {
+	float2 PPCo = (float2(Dtid) + 0.5f)+ TemporalJitterPixels;	
+	float2 PPCk = floor(PPCo) + 0.5;
+
+	// Apply offset to the input depth pixel coordinate.
+    int2 DepthCoord = int2(InputViewMin) + int2(PPCk);
+
 	float4 OutputColor;
 
-	float2 encodedSample = abs(TemporalJitterPixels);
-	OutputColor.a = 1.0;
-	OutputColor.r = encodedSample.x;
-	OutputColor.g = encodedSample.y;
-
-	int code0 = TemporalJitterPixels.x < 0.f ? 1 : 0;
-	int code1 = TemporalJitterPixels.y < 0.f ? 1 : 0;
-   	int code = code0 + code1 * 2;
-	OutputColor.b = code;
+	OutputColor.r = LoadSceneDepthTexture(DepthCoord, int2(0, 0));
+	OutputColor.g = OutputColor.r;
+	OutputColor.b = OutputColor.r;
+	OutputColor.a = 1;
 
 	OutputTexture[Dtid] = OutputColor;
 }

@@ -12,6 +12,12 @@
 #include "HighResScreenshot.h"
 #include "SceneTextureParameters.h"
 
+#include "Misc/FileHelper.h"
+#include "Dom/JsonValue.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+
 #define CAPTURE_SR_SKIP_CODE	(true)
 
 const TCHAR* const kTAAOutputNames[] = {
@@ -50,45 +56,45 @@ static TUniquePtr<FImagePixelData> ReadbackPixelData(FRHICommandListImmediate& R
 
 	switch (Texture->GetFormat())
 	{
-	case PF_FloatRGBA:
-	{
-		TArray<FFloat16Color> RawPixels;
-		RawPixels.SetNum(SourceRect.Width() * SourceRect.Height());
-		RHICmdList.ReadSurfaceFloatData(Texture, SourceRect, RawPixels, (ECubeFace)0, 0, 0);
-		TUniquePtr<TImagePixelData<FFloat16Color>> PixelData = MakeUnique<TImagePixelData<FFloat16Color>>(SourceRect.Size(), TArray64<FFloat16Color>(MoveTemp(RawPixels)));
+		case PF_FloatRGBA:
+		{
+			TArray<FFloat16Color> RawPixels;
+			RawPixels.SetNum(SourceRect.Width() * SourceRect.Height());
+			RHICmdList.ReadSurfaceFloatData(Texture, SourceRect, RawPixels, (ECubeFace)0, 0, 0);
+			TUniquePtr<TImagePixelData<FFloat16Color>> PixelData = MakeUnique<TImagePixelData<FFloat16Color>>(SourceRect.Size(), TArray64<FFloat16Color>(MoveTemp(RawPixels)));
 
-		check(PixelData->IsDataWellFormed());
-		return PixelData;
-	}
+			check(PixelData->IsDataWellFormed());
+			return PixelData;
+		}
 
-	case PF_A32B32G32R32F:
-	{
-		FReadSurfaceDataFlags ReadDataFlags(RCM_MinMax);
-		ReadDataFlags.SetLinearToGamma(false);
+		case PF_A32B32G32R32F:
+		{
+			FReadSurfaceDataFlags ReadDataFlags(RCM_MinMax);
+			ReadDataFlags.SetLinearToGamma(false);
 
-		TArray<FLinearColor> RawPixels;
-		RawPixels.SetNum(SourceRect.Width() * SourceRect.Height());
-		RHICmdList.ReadSurfaceData(Texture, SourceRect, RawPixels, ReadDataFlags);
-		TUniquePtr<TImagePixelData<FLinearColor>> PixelData = MakeUnique<TImagePixelData<FLinearColor>>(SourceRect.Size(), TArray64<FLinearColor>(MoveTemp(RawPixels)));
+			TArray<FLinearColor> RawPixels;
+			RawPixels.SetNum(SourceRect.Width() * SourceRect.Height());
+			RHICmdList.ReadSurfaceData(Texture, SourceRect, RawPixels, ReadDataFlags);
+			TUniquePtr<TImagePixelData<FLinearColor>> PixelData = MakeUnique<TImagePixelData<FLinearColor>>(SourceRect.Size(), TArray64<FLinearColor>(MoveTemp(RawPixels)));
 
-		check(PixelData->IsDataWellFormed());
-		return PixelData;
-	}
+			check(PixelData->IsDataWellFormed());
+			return PixelData;
+		}
 
-	case PF_R8G8B8A8:
-	case PF_B8G8R8A8:
-	{
-		FReadSurfaceDataFlags ReadDataFlags;
-		ReadDataFlags.SetLinearToGamma(false);
+		case PF_R8G8B8A8:
+		case PF_B8G8R8A8:
+		{
+			FReadSurfaceDataFlags ReadDataFlags;
+			ReadDataFlags.SetLinearToGamma(false);
 
-		TArray<FColor> RawPixels;
-		RawPixels.SetNum(SourceRect.Width() * SourceRect.Height());
-		RHICmdList.ReadSurfaceData(Texture, SourceRect, RawPixels, ReadDataFlags);
-		TUniquePtr<TImagePixelData<FColor>> PixelData = MakeUnique<TImagePixelData<FColor>>(SourceRect.Size(), TArray64<FColor>(MoveTemp(RawPixels)));
+			TArray<FColor> RawPixels;
+			RawPixels.SetNum(SourceRect.Width() * SourceRect.Height());
+			RHICmdList.ReadSurfaceData(Texture, SourceRect, RawPixels, ReadDataFlags);
+			TUniquePtr<TImagePixelData<FColor>> PixelData = MakeUnique<TImagePixelData<FColor>>(SourceRect.Size(), TArray64<FColor>(MoveTemp(RawPixels)));
 
-		check(PixelData->IsDataWellFormed());
-		return PixelData;
-	}
+			check(PixelData->IsDataWellFormed());
+			return PixelData;
+		}
 	}
 
 	return nullptr;
@@ -153,13 +159,9 @@ class FXeSSVelocityFlattenCS : public FGlobalShader
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 #if ENGINE_MAJOR_VERSION < 5
-		SHADER_PARAMETER(FVector4, InputSceneSize)
-
 		SHADER_PARAMETER(FVector4, OutputViewportSize)
 		SHADER_PARAMETER(FVector4, OutputViewportRect)
 #else
-		SHADER_PARAMETER(FVector4f, InputSceneSize)
-
 		SHADER_PARAMETER(FVector4f, OutputViewportSize)
 		SHADER_PARAMETER(FVector4f, OutputViewportRect)
 #endif
@@ -181,7 +183,7 @@ class FXeSSVelocityFlattenCS : public FGlobalShader
 #endif
 
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, OutVelocityTex)
-		END_SHADER_PARAMETER_STRUCT()
+	END_SHADER_PARAMETER_STRUCT()
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 	{
@@ -219,14 +221,13 @@ static FRDGTextureRef AddVelocityFlatteningXeSSPass(
 
 	FRDGTexture* OutputVelocityTexture = GraphBuilder.CreateTexture(
 		SceneVelocityDesc,
-		TEXT("Upscaled Velocity Texture"),
+		TEXT("XeSS Capture Upscaled Velocity Texture"),
 		ERDGTextureFlags::MultiFrame);
 
 	{
 		FXeSSVelocityFlattenCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FXeSSVelocityFlattenCS::FParameters>();
 
 		// Setups common shader parameters
-		const FIntPoint InputExtent = SrcRect.Size();
 		const FIntRect InputViewRect = SrcRect;
 
 		PassParameters->ViewUniformBuffer = View.ViewUniformBuffer;
@@ -288,6 +289,226 @@ static FRDGTextureRef AddVelocityFlatteningXeSSPass(
 	return OutputVelocityTexture;
 }
 
+class FLowResXeSSVelocityCS : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FLowResXeSSVelocityCS);
+	SHADER_USE_PARAMETER_STRUCT(FLowResXeSSVelocityCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneDepthTexture)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, GBufferVelocityTexture)
+
+		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, ViewUniformBuffer)
+
+		// Temporal upsample specific parameters.
+#if ENGINE_MAJOR_VERSION < 5
+		SHADER_PARAMETER(FVector2D, InputViewMin)
+		SHADER_PARAMETER(FVector4, InputViewSize)
+		SHADER_PARAMETER(FVector2D, TemporalJitterPixels)
+#else
+		SHADER_PARAMETER(FVector2f, InputViewMin)
+		SHADER_PARAMETER(FVector4f, InputViewSize)
+		SHADER_PARAMETER(FVector2f, TemporalJitterPixels)
+#endif
+
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, OutVelocityTex)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		FPermutationDomain PermutationVector(Parameters.PermutationId);
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		OutEnvironment.SetDefine(TEXT("THREADGROUP_SIZEX"), GXeSSTileSizeX);
+		OutEnvironment.SetDefine(TEXT("THREADGROUP_SIZEY"), GXeSSTileSizeY);
+	}
+}; // class FLowResXeSSVelocityCS
+
+IMPLEMENT_GLOBAL_SHADER(FLowResXeSSVelocityCS, "/Plugin/XeSSCapture/Private/CaptureLowResVelocity.usf", "MainCS", SF_Compute);
+
+static FRDGTextureRef AddLowResVelocityXeSSPass(
+	FRDGBuilder& GraphBuilder,
+	FRDGTextureRef InSceneDepthTexture,
+	FRDGTextureRef InVelocityTexture,
+	const FViewInfo& View)
+{
+	check(InSceneDepthTexture);
+	check(InVelocityTexture);
+
+	// Dst rectangle.
+	const FIntRect DestRect = FIntRect(FIntPoint::ZeroValue, View.ViewRect.Size());
+
+	FRDGTextureDesc SceneVelocityDesc = FRDGTextureDesc::Create2D(
+		DestRect.Size(),
+		PF_FloatRGBA,
+		FClearValueBinding::Black,
+		TexCreate_ShaderResource | TexCreate_UAV);
+
+	FRDGTexture* OutputVelocityTexture = GraphBuilder.CreateTexture(
+		SceneVelocityDesc,
+		TEXT("XeSS Capture Low-Res Velocity Texture"),
+		ERDGTextureFlags::MultiFrame);
+
+	{
+		FLowResXeSSVelocityCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FLowResXeSSVelocityCS::FParameters>();
+
+		// Setups common shader parameters
+		const FIntRect InputViewRect = View.ViewRect;
+
+		PassParameters->ViewUniformBuffer = View.ViewUniformBuffer;
+
+		PassParameters->SceneDepthTexture = InSceneDepthTexture;
+		PassParameters->GBufferVelocityTexture = InVelocityTexture;
+
+		// We need a valid velocity buffer texture. Use black (no velocity) if none exists.
+		if (!PassParameters->GBufferVelocityTexture)
+		{
+			PassParameters->GBufferVelocityTexture = GraphBuilder.RegisterExternalTexture(GSystemTextures.BlackDummy);;
+		}
+
+		// Temporal upsample specific shader parameters.
+		{
+#if ENGINE_MAJOR_VERSION < 5
+			PassParameters->TemporalJitterPixels = View.TemporalJitterPixels;
+			PassParameters->InputViewMin = FVector2D(InputViewRect.Min.X, InputViewRect.Min.Y);
+			PassParameters->InputViewSize = FVector4(
+				InputViewRect.Width(), InputViewRect.Height(), 1.0f / InputViewRect.Width(), 1.0f / InputViewRect.Height());
+#else
+			PassParameters->TemporalJitterPixels = FVector2f(View.TemporalJitterPixels);
+			PassParameters->InputViewMin = FVector2f(InputViewRect.Min.X, InputViewRect.Min.Y);
+			PassParameters->InputViewSize = FVector4f(
+				InputViewRect.Width(), InputViewRect.Height(), 1.0f / InputViewRect.Width(), 1.0f / InputViewRect.Height());
+#endif
+		}
+
+		// UAVs
+		{
+			PassParameters->OutVelocityTex = GraphBuilder.CreateUAV(OutputVelocityTexture);
+		}
+
+		TShaderMapRef<FLowResXeSSVelocityCS> ComputeShader(View.ShaderMap);
+
+		ClearUnusedGraphResources(ComputeShader, PassParameters);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("XeSSCapture %s %dx%d",
+				TEXT("Low-Res Velocity"),
+				DestRect.Width(), DestRect.Height()),
+			ComputeShader,
+			PassParameters,
+			FComputeShaderUtils::GetGroupCount(DestRect.Size(), GXeSSTileSizeX));
+	}
+
+	return OutputVelocityTexture;
+}
+
+class FXeSSDepthCS : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FXeSSDepthCS);
+	SHADER_USE_PARAMETER_STRUCT(FXeSSDepthCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, SceneDepthTexture)
+
+		// Temporal upsample specific parameters.
+#if ENGINE_MAJOR_VERSION < 5
+		SHADER_PARAMETER(FVector2D, InputViewMin)
+		SHADER_PARAMETER(FVector4, InputViewSize)
+		SHADER_PARAMETER(FVector2D, TemporalJitterPixels)
+#else
+		SHADER_PARAMETER(FVector2f, InputViewMin)
+		SHADER_PARAMETER(FVector4f, InputViewSize)
+		SHADER_PARAMETER(FVector2f, TemporalJitterPixels)
+#endif
+
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, OutputTexture)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		FPermutationDomain PermutationVector(Parameters.PermutationId);
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		OutEnvironment.SetDefine(TEXT("THREADGROUP_SIZEX"), GXeSSTileSizeX);
+		OutEnvironment.SetDefine(TEXT("THREADGROUP_SIZEY"), GXeSSTileSizeY);
+	}
+}; // class FXeSSDepthCS
+
+IMPLEMENT_GLOBAL_SHADER(FXeSSDepthCS, "/Plugin/XeSSCapture/Private/CaptureDepth.usf", "MainCS", SF_Compute);
+
+static FRDGTextureRef AddDepthXeSSPass(
+	FRDGBuilder& GraphBuilder,
+	FRDGTextureRef InSceneDepthTexture,
+	const FViewInfo& View)
+{
+	check(InSceneDepthTexture);
+
+	// Dst rectangle.
+	const FIntRect DestRect = FIntRect(FIntPoint::ZeroValue, View.ViewRect.Size());
+
+	FRDGTextureDesc SceneVelocityDesc = FRDGTextureDesc::Create2D(
+		DestRect.Size(),
+		PF_FloatRGBA,
+		FClearValueBinding::Black,
+		TexCreate_ShaderResource | TexCreate_UAV);
+
+	FRDGTexture* OutputDepthTexture = GraphBuilder.CreateTexture(
+		SceneVelocityDesc,
+		TEXT("XeSS Capture Depth Texture"),
+		ERDGTextureFlags::MultiFrame);
+
+	{
+		FXeSSDepthCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FXeSSDepthCS::FParameters>();
+
+		// Setups common shader parameters
+		const FIntRect InputViewRect = View.ViewRect;
+
+		PassParameters->SceneDepthTexture = InSceneDepthTexture;
+
+		// Temporal upsample specific shader parameters.
+		{
+#if ENGINE_MAJOR_VERSION < 5
+			PassParameters->TemporalJitterPixels = View.TemporalJitterPixels;
+			PassParameters->InputViewMin = FVector2D(InputViewRect.Min.X, InputViewRect.Min.Y);
+			PassParameters->InputViewSize = FVector4(
+				InputViewRect.Width(), InputViewRect.Height(), 1.0f / InputViewRect.Width(), 1.0f / InputViewRect.Height());
+#else
+			PassParameters->TemporalJitterPixels = FVector2f(View.TemporalJitterPixels);
+			PassParameters->InputViewMin = FVector2f(InputViewRect.Min.X, InputViewRect.Min.Y);
+			PassParameters->InputViewSize = FVector4f(
+				InputViewRect.Width(), InputViewRect.Height(), 1.0f / InputViewRect.Width(), 1.0f / InputViewRect.Height());
+#endif
+		}
+
+		// UAVs
+		{
+			PassParameters->OutputTexture = GraphBuilder.CreateUAV(OutputDepthTexture);
+		}
+
+		TShaderMapRef<FXeSSDepthCS> ComputeShader(View.ShaderMap);
+
+		ClearUnusedGraphResources(ComputeShader, PassParameters);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("XeSSCapture %s %dx%d",
+				TEXT("Depth"),
+				DestRect.Width(), DestRect.Height()),
+			ComputeShader,
+			PassParameters,
+			FComputeShaderUtils::GetGroupCount(DestRect.Size(), GXeSSTileSizeX));
+	}
+
+	return OutputDepthTexture;
+}
+
 class FXeSSSampleCS : public FGlobalShader
 {
 public:
@@ -301,7 +522,7 @@ public:
 		SHADER_PARAMETER(FVector2f, TemporalJitterPixels)
 #endif
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, OutputTexture)
-		END_SHADER_PARAMETER_STRUCT()
+	END_SHADER_PARAMETER_STRUCT()
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 	{
@@ -322,7 +543,7 @@ static FRDGTextureRef AddSamplePass(
 	FRDGBuilder& GraphBuilder,
 	const FViewInfo& View)
 {
-	const FIntRect DestRect = View.ViewRect;
+	const FIntRect DestRect = FIntRect(FIntPoint::ZeroValue, View.ViewRect.Size());
 
 	FRDGTextureDesc SceneSampleDesc = FRDGTextureDesc::Create2D(
 		DestRect.Size(),
@@ -332,7 +553,7 @@ static FRDGTextureRef AddSamplePass(
 
 	FRDGTexture* OutputSampleTexture = GraphBuilder.CreateTexture(
 		SceneSampleDesc,
-		TEXT("Sample Texture"),
+		TEXT("XeSS Capture Sample Texture"),
 		ERDGTextureFlags::MultiFrame);
 
 	// cs
@@ -1266,6 +1487,25 @@ ITemporalUpscaler::FOutputs FXeSSVelocityTemporalUpscaler::AddPasses(
 		AddDumpToExrPass(GraphBuilder, SceneSampler, FString::Printf(TEXT("%s\\%s\\sample\\sample_%d.exr"), *OutputDirectory->GetString(), *DateTime->GetString(), FrameIndex->GetValueOnRenderThread()));
 	}
 
+	// depth
+	const FRDGTextureRef XeSSDepth = AddDepthXeSSPass(GraphBuilder, PassInputs.SceneDepthTexture, View);
+	if (FrameIndex->GetValueOnRenderThread() >= 0)
+	{
+		FScreenPassTexture SceneDepth(XeSSDepth, FirstViewRect);
+		AddDumpToExrPass(GraphBuilder, SceneDepth, FString::Printf(TEXT("%s\\%s\\depth\\depth_%d.exr"), *OutputDirectory->GetString(), *DateTime->GetString(), FrameIndex->GetValueOnRenderThread()));
+	}
+
+	// low-res velocity
+	const FRDGTextureRef XeSSLowResVelocity = AddLowResVelocityXeSSPass(GraphBuilder,
+		PassInputs.SceneDepthTexture,
+		PassInputs.SceneVelocityTexture,
+		View);
+	if (FrameIndex->GetValueOnRenderThread() >= 0)
+	{
+		FScreenPassTexture SceneLowResVelocity(XeSSLowResVelocity, FirstViewRect);
+		AddDumpToExrPass(GraphBuilder, SceneLowResVelocity, FString::Printf(TEXT("%s\\%s\\lowres_velocity\\lowres_velocity_%d.exr"), *OutputDirectory->GetString(), *DateTime->GetString(), FrameIndex->GetValueOnRenderThread()));
+	}
+
 	// velocity
 	const FRDGTextureRef XeSSUpscaledVelocity = AddVelocityFlatteningXeSSPass(GraphBuilder,
 		PassInputs.SceneDepthTexture,
@@ -1282,6 +1522,22 @@ ITemporalUpscaler::FOutputs FXeSSVelocityTemporalUpscaler::AddPasses(
 #else
 	return ITemporalUpscaler::GetDefaultTemporalUpscaler()->AddPasses(GraphBuilder, View, PassInputs);
 #endif
+}
+
+static void SaveSampleToJson(const FString& fileName, float sampleX, float sampleY)
+{
+	TSharedRef<FJsonObject> RootObject = MakeShareable(new FJsonObject);
+
+	RootObject->SetNumberField(TEXT("jitterX"), sampleX);
+	RootObject->SetNumberField(TEXT("jitterY"), sampleY);
+
+	//Write the json file
+	FString Json;
+	TSharedRef<TJsonWriter<> > JsonWriter = TJsonWriterFactory<>::Create(&Json, 0);
+	if (FJsonSerializer::Serialize(RootObject, JsonWriter))
+	{
+		FFileHelper::SaveStringToFile(Json, *fileName);
+	}
 }
 
 #if ENGINE_MAJOR_VERSION < 5
@@ -1313,6 +1569,11 @@ ITemporalUpscaler::FOutputs FXeSSVelocityTemporalUpscaler::AddPasses(
 	static const auto DateTime = IConsoleManager::Get().FindConsoleVariable(TEXT("r.XeSSCapture.DateTime"));
 	static const auto FrameIndex = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.XeSSCapture.FrameIndex"));
 	static const auto SampleIndex = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.XeSSCapture.SampleIndex"));
+
+	if (FrameIndex->GetValueOnRenderThread() == 0)
+	{
+		SaveSampleToJson(FString::Printf(TEXT("%s\\%s\\sr\\samples\\srsample_%d.json"), *OutputDirectory->GetString(), *DateTime->GetString(), SampleIndex->GetValueOnRenderThread()), View.TemporalJitterPixels.X, View.TemporalJitterPixels.Y);
+	}
 
 	// sr
 	AddSrMainTemporalAAPasses(GraphBuilder, View, PassInputs, OutSceneColorTexture, OutSceneColorViewRect, OutSceneColorHalfResTexture, OutSceneColorHalfResViewRect);

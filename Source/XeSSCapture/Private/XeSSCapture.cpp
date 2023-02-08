@@ -228,6 +228,7 @@ void FXeSSCaptureModule::OnBeginFrame()
 				OverrideCommands(TEXT("r.TemporalAA.Upsampling"), 1);
 				OverrideCommands(TEXT("r.TemporalAASamples"), 8);
 				OverrideCommandsFloat(TEXT("r.ScreenPercentage"), CVarXeSSCaptureScreenPercentage.GetValueOnGameThread());
+				OverrideCommands(TEXT("r.UsePreExposure"), 0);
 
 				m_pReservedTemporalUpscaler = GTemporalUpscaler;
 
@@ -305,6 +306,7 @@ void FXeSSCaptureModule::OnEndFrame()
 			RestoreCommands(TEXT("r.TemporalAA.Upsampling"));
 			RestoreCommands(TEXT("r.TemporalAASamples"));
 			RestoreCommandsFloat(TEXT("r.ScreenPercentage"));
+			RestoreCommands(TEXT("r.UsePreExposure"));
 
 			PXeSSCaptureViewExtension->SetActive(false);
 		}

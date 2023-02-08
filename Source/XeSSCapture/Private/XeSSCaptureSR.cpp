@@ -11,31 +11,8 @@
 #include "Kismet/GameplayStatics.h"
 #include "Engine/LocalPlayer.h"
 #include "LegacyScreenPercentageDriver.h"
-#include "Misc/FileHelper.h"
-#include "Dom/JsonValue.h"
-#include "Dom/JsonObject.h"
-#include "Serialization/JsonReader.h"
-#include "Serialization/JsonSerializer.h"
 // sample 256
 #include "Jitter.h"
-
-static TAutoConsoleVariable<int32> CVarTemporalAASampleOverride(
-	TEXT("r.XeSSCapture.TemporalAASampleOverride"),
-	0,
-	TEXT("If we need to override TAA samples."),
-	ECVF_RenderThreadSafe);
-
-static TAutoConsoleVariable<float> CVarTemporalAASampleOverrideX(
-	TEXT("r.XeSSCapture.TemporalAASampleOverrideX"),
-	0.0f,
-	TEXT("Override TAA sample X."),
-	ECVF_RenderThreadSafe);
-
-static TAutoConsoleVariable<float> CVarTemporalAASampleOverrideY(
-	TEXT("r.XeSSCapture.TemporalAASampleOverrideY"),
-	0.0f,
-	TEXT("Override TAA sample Y."),
-	ECVF_RenderThreadSafe);
 
 static TAutoConsoleVariable<int32> CVarXeSSCaptureSampleIndex(
 	TEXT("r.XeSSCapture.SampleIndex"),
@@ -128,44 +105,19 @@ void XeSSCaptureSR::Capture()
 	CaptureRenderTexture->TargetGamma = 1.0;
 	CaptureRenderTexture->InitCustomFormat(TargetSize.X, TargetSize.Y, PF_B8G8R8A8, false);
 
-	CVarTemporalAASampleOverride->Set(1);
+	// capture for 256 samples
+	static const auto TemporalAASamples = IConsoleManager::Get().FindConsoleVariable(TEXT("r.TemporalAASamples"));
+	TemporalAASamples->Set(64);
 
 	for (int i = 0; i < 256; i++)
 	{
-		static const auto OutputDirectory = IConsoleManager::Get().FindConsoleVariable(TEXT("r.XeSSCapture.OutputDirectory"));
-		static const auto DateTime = IConsoleManager::Get().FindConsoleVariable(TEXT("r.XeSSCapture.DateTime"));
-		static const auto FrameIndex = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.XeSSCapture.FrameIndex"));
-
-		if (FrameIndex->GetValueOnGameThread() == 0)
-		{
-			SaveSampleToJson(FString::Printf(TEXT("%s\\%s\\sr\\samples\\srsample_%d.json"), *OutputDirectory->GetString(), *DateTime->GetString(), i), samples_256[i][0], samples_256[i][1]);
-		}
-
 		CVarXeSSCaptureSampleIndex->Set(i);
-		CVarTemporalAASampleOverrideX->Set(samples_256[i][0]);
-		CVarTemporalAASampleOverrideY->Set(samples_256[i][1]);
-
 		CaptureSample(CaptureRenderTexture, TargetSize, World, LP, ProjectionData);
 	}
 
-	CVarTemporalAASampleOverride->Set(0);
+	// restore to 32 samples
+	TemporalAASamples->Set(8);
 
 	CaptureRenderTexture->RemoveFromRoot();
 	CaptureRenderTexture = nullptr;
-}
-
-void XeSSCaptureSR::SaveSampleToJson(const FString& fileName, float sampleX, float sampleY)
-{
-	TSharedRef<FJsonObject> RootObject = MakeShareable(new FJsonObject);
-
-	RootObject->SetNumberField(TEXT("jitterX"), sampleX);
-	RootObject->SetNumberField(TEXT("jitterY"), sampleY);
-
-	//Write the json file
-	FString Json;
-	TSharedRef<TJsonWriter<> > JsonWriter = TJsonWriterFactory<>::Create(&Json, 0);
-	if (FJsonSerializer::Serialize(RootObject, JsonWriter))
-	{
-		FFileHelper::SaveStringToFile(Json, *fileName);
-	}
 }
