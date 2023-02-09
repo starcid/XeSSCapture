@@ -12,6 +12,7 @@ public:
 		m_bCaptureSR = false;
 		m_iReserveView0TemporalAAIndex = -1;
 		m_iReserveView0FrameIndex = -1;
+		m_bHaveSetView = false;
 	}
 
 	bool IsActive() { return m_bActive; }
@@ -34,4 +35,6 @@ private:
 
 	int m_iReserveView0TemporalAAIndex;
 	int m_iReserveView0FrameIndex;
+
+	bool m_bHaveSetView;
 };

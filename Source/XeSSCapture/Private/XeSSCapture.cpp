@@ -228,9 +228,20 @@ void FXeSSCaptureModule::OnBeginFrame()
 				OverrideCommands(TEXT("r.TemporalAA.Upsampling"), 1);
 				OverrideCommands(TEXT("r.TemporalAASamples"), 8);
 				OverrideCommandsFloat(TEXT("r.ScreenPercentage"), CVarXeSSCaptureScreenPercentage.GetValueOnGameThread());
-				OverrideCommands(TEXT("r.UsePreExposure"), 0);
-
+				OverrideCommands(TEXT("r.UsePreExposure"), 0);	// UE4 only
+				OverrideCommandsFloat(TEXT("r.EyeAdaptation.PreExposureOverride"), 1.0f); // UE4/5 both
+				OverrideCommands(TEXT("r.Editor.Viewport.ScreenPercentageMode.RealTime"), 0);	// UE5
+				OverrideCommands(TEXT("r.ScreenPercentage.Mode"), 0);	// UE5
+				OverrideCommandsFloat(TEXT("r.Editor.Viewport.ScreenPercentage"), CVarXeSSCaptureScreenPercentage.GetValueOnGameThread()); // UE5
+				OverrideCommands(TEXT("r.Editor.Viewport.MinRenderingResolution"), 256);	// UE5
+				OverrideCommands(TEXT("r.Editor.Viewport.MaxRenderingResolution"), 2160);	// UE5
+				OverrideCommands(TEXT("r.ScreenPercentage.MinResolution"), 256);	// UE5
+				OverrideCommands(TEXT("r.ScreenPercentage.MaxResolution"), 2160);	// UE5
+				OverrideCommands(TEXT("r.PostProcessAAQuality"), 4);	// UE4 high
+				OverrideCommands(TEXT("r.TemporalAA.Quality"), 2);	// UE5 high
+#if ENGINE_MAJOR_VERSION < 5
 				m_pReservedTemporalUpscaler = GTemporalUpscaler;
+#endif
 
 				// add one frame to skip
 				CaptureFrameCount++;
@@ -268,7 +279,9 @@ void FXeSSCaptureModule::OnEndFrame()
 			GEngine->bSmoothFrameRate = m_bReservedSmoothFrameRate;
 			GEngine->bUseFixedFrameRate = m_bReservedUseFixedFrameRate;
 			GEngine->FixedFrameRate = m_fReservedFixedFrameRate;
+#if ENGINE_MAJOR_VERSION < 5
 			GTemporalUpscaler = m_pReservedTemporalUpscaler;
+#endif
 
 			// restore cmds
 			RestoreCommands(TEXT("r.SSR.ExperimentalDenoiser"));
@@ -306,7 +319,17 @@ void FXeSSCaptureModule::OnEndFrame()
 			RestoreCommands(TEXT("r.TemporalAA.Upsampling"));
 			RestoreCommands(TEXT("r.TemporalAASamples"));
 			RestoreCommandsFloat(TEXT("r.ScreenPercentage"));
-			RestoreCommands(TEXT("r.UsePreExposure"));
+			RestoreCommands(TEXT("r.UsePreExposure"));	// UE4 only
+			RestoreCommandsFloat(TEXT("r.EyeAdaptation.PreExposureOverride")); // UE4/5 both
+			RestoreCommands(TEXT("r.Editor.Viewport.ScreenPercentageMode.RealTime"));	// UE5
+			RestoreCommands(TEXT("r.ScreenPercentage.Mode"));	// UE5
+			RestoreCommandsFloat(TEXT("r.Editor.Viewport.ScreenPercentage")); // UE5
+			RestoreCommands(TEXT("r.Editor.Viewport.MinRenderingResolution"));	// UE5
+			RestoreCommands(TEXT("r.Editor.Viewport.MaxRenderingResolution"));	// UE5
+			RestoreCommands(TEXT("r.ScreenPercentage.MinResolution"));	// UE5
+			RestoreCommands(TEXT("r.ScreenPercentage.MaxResolution"));	// UE5
+			RestoreCommands(TEXT("r.PostProcessAAQuality"));	// UE4 high
+			RestoreCommands(TEXT("r.TemporalAA.Quality"));	// UE5 high
 
 			PXeSSCaptureViewExtension->SetActive(false);
 		}

@@ -40,6 +40,18 @@ const TCHAR* const kTAAPassNames[] = {
 	TEXT("DOFUpsampling"),
 };
 
+#if ENGINE_MAJOR_VERSION >= 5
+#if WITH_MGPU
+const FName TAAEffectName("TAA");
+#endif
+
+const TCHAR* const kTAAQualityNames[] = {
+	TEXT("Low"),
+	TEXT("Medium"),
+	TEXT("High"),
+};
+#endif
+
 const int32 GTemporalAATileSizeX = 8;
 const int32 GTemporalAATileSizeY = 8;
 const int32 GXeSSTileSizeX = FComputeShaderUtils::kGolden2DGroupSize;
@@ -62,6 +74,20 @@ static TUniquePtr<FImagePixelData> ReadbackPixelData(FRHICommandListImmediate& R
 			RawPixels.SetNum(SourceRect.Width() * SourceRect.Height());
 			RHICmdList.ReadSurfaceFloatData(Texture, SourceRect, RawPixels, (ECubeFace)0, 0, 0);
 			TUniquePtr<TImagePixelData<FFloat16Color>> PixelData = MakeUnique<TImagePixelData<FFloat16Color>>(SourceRect.Size(), TArray64<FFloat16Color>(MoveTemp(RawPixels)));
+
+			check(PixelData->IsDataWellFormed());
+			return PixelData;
+		}
+
+		case PF_FloatR11G11B10:
+		{
+			FReadSurfaceDataFlags ReadDataFlags(RCM_MinMax);
+			ReadDataFlags.SetLinearToGamma(false);
+
+			TArray<FLinearColor> RawPixels;
+			RawPixels.SetNum(SourceRect.Width() * SourceRect.Height());
+			RHICmdList.ReadSurfaceData(Texture, SourceRect, RawPixels, ReadDataFlags);
+			TUniquePtr<TImagePixelData<FLinearColor>> PixelData = MakeUnique<TImagePixelData<FLinearColor>>(SourceRect.Size(), TArray64<FLinearColor>(MoveTemp(RawPixels)));
 
 			check(PixelData->IsDataWellFormed());
 			return PixelData;
@@ -144,7 +170,9 @@ static void AddDumpToExrPass(FRDGBuilder& GraphBuilder, FScreenPassTexture Input
 				// any 8 bit output format needed linearizing, but this is not a safe assumption to make at such a low level:
 				// void ExtractAndConvertChannel(const uint8*Src, uint32 SrcChannels, uint32 x, uint32 y, float* ChannelOUT)
 				// void ExtractAndConvertChannel(const uint8*Src, uint32 SrcChannels, uint32 x, uint32 y, FFloat16* ChannelOUT)
+#if ENGINE_MAJOR_VERSION < 5
 				ImageTask->PixelPreProcessors.Add(TAsyncGammaCorrect<FColor>(2.2f));
+#endif
 			}
 		}
 
@@ -587,7 +615,11 @@ struct FTAANoBlendPassParameters
 	ETAAPassConfig Pass = ETAAPassConfig::Main;
 
 	// Whether to use the faster shader permutation.
+#if ENGINE_MAJOR_VERSION < 5
 	bool bUseFast = false;
+#else
+	ETAAQuality Quality = ETAAQuality::High;
+#endif
 
 	// Whether output texture should be render targetable.
 	bool bOutputRenderTargetable = false;
@@ -701,33 +733,61 @@ class FTAAStandaloneNoBlendCS : public FGlobalShader
 	SHADER_USE_PARAMETER_STRUCT(FTAAStandaloneNoBlendCS, FGlobalShader);
 
 	class FTAAPassConfigDim : SHADER_PERMUTATION_ENUM_CLASS("TAA_PASS_CONFIG", ETAAPassConfig);
+#if ENGINE_MAJOR_VERSION < 5
 	class FTAAFastDim : SHADER_PERMUTATION_BOOL("TAA_FAST");
+#else
+	class FTAAQualityDim : SHADER_PERMUTATION_ENUM_CLASS("TAA_QUALITY", ETAAQuality);
+#endif
 	class FTAAResponsiveDim : SHADER_PERMUTATION_BOOL("TAA_RESPONSIVE");
 	class FTAAScreenPercentageDim : SHADER_PERMUTATION_INT("TAA_SCREEN_PERCENTAGE_RANGE", 4);
+#if ENGINE_MAJOR_VERSION < 5
 	class FTAAUpsampleFilteredDim : SHADER_PERMUTATION_BOOL("TAA_UPSAMPLE_FILTERED");
+#endif
 	class FTAADownsampleDim : SHADER_PERMUTATION_BOOL("TAA_DOWNSAMPLE");
 
 	using FPermutationDomain = TShaderPermutationDomain<
 		FTAAPassConfigDim,
+#if ENGINE_MAJOR_VERSION < 5
 		FTAAFastDim,
+#else
+		FTAAQualityDim,
+#endif
 		FTAAScreenPercentageDim,
+#if ENGINE_MAJOR_VERSION < 5
 		FTAAUpsampleFilteredDim,
+#endif
 		FTAADownsampleDim>;
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+#if ENGINE_MAJOR_VERSION < 5
 		SHADER_PARAMETER(FVector4, ViewportUVToInputBufferUV)
 		SHADER_PARAMETER(FVector4, MaxViewportUVAndSvPositionToViewportUV)
 		SHADER_PARAMETER(FVector2D, ScreenPosAbsMax)
+#else
+		SHADER_PARAMETER(FVector4f, ViewportUVToInputBufferUV)
+		SHADER_PARAMETER(FVector4f, MaxViewportUVAndSvPositionToViewportUV)
+		SHADER_PARAMETER(FVector2f, ScreenPosAbsMax)
+#endif
 		SHADER_PARAMETER(float, HistoryPreExposureCorrection)
 		SHADER_PARAMETER(float, CurrentFrameWeight)
 		SHADER_PARAMETER(int32, bCameraCut)
 
+#if ENGINE_MAJOR_VERSION < 5
 		SHADER_PARAMETER_ARRAY(float, SampleWeights, [9])
 		SHADER_PARAMETER_ARRAY(float, PlusWeights, [5])
+#else
+		SHADER_PARAMETER_SCALAR_ARRAY(float, SampleWeights, [9])
+		SHADER_PARAMETER_SCALAR_ARRAY(float, PlusWeights, [5])
+#endif
 
+#if ENGINE_MAJOR_VERSION < 5
 		SHADER_PARAMETER(FVector4, InputSceneColorSize)
+#else
+		SHADER_PARAMETER(FVector4f, InputSceneColorSize)
+#endif
 		SHADER_PARAMETER(FIntPoint, InputMinPixelCoord)
 		SHADER_PARAMETER(FIntPoint, InputMaxPixelCoord)
+#if ENGINE_MAJOR_VERSION < 5
 		SHADER_PARAMETER(FVector4, OutputViewportSize)
 		SHADER_PARAMETER(FVector4, OutputViewportRect)
 		SHADER_PARAMETER(FVector, OutputQuantizationError)
@@ -736,9 +796,23 @@ class FTAAStandaloneNoBlendCS : public FGlobalShader
 		SHADER_PARAMETER(FVector4, HistoryBufferSize)
 		SHADER_PARAMETER(FVector4, HistoryBufferUVMinMax)
 		SHADER_PARAMETER(FVector4, ScreenPosToHistoryBufferUV)
+#else
+		SHADER_PARAMETER(FVector4f, OutputViewportSize)
+		SHADER_PARAMETER(FVector4f, OutputViewportRect)
+		SHADER_PARAMETER(FVector3f, OutputQuantizationError)
+
+		// History parameters
+		SHADER_PARAMETER(FVector4f, HistoryBufferSize)
+		SHADER_PARAMETER(FVector4f, HistoryBufferUVMinMax)
+		SHADER_PARAMETER(FVector4f, ScreenPosToHistoryBufferUV)
+#endif
 
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, EyeAdaptationTexture)
+#if ENGINE_MAJOR_VERSION < 5
 		SHADER_PARAMETER_SRV(Buffer<float4>, EyeAdaptationBuffer)
+#else
+		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float4>, EyeAdaptationBuffer)
+#endif
 
 		// Inputs
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, InputSceneColor)
@@ -754,15 +828,24 @@ class FTAAStandaloneNoBlendCS : public FGlobalShader
 		SHADER_PARAMETER_SAMPLER(SamplerState, SceneDepthTextureSampler)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, GBufferVelocityTexture)
 		SHADER_PARAMETER_SAMPLER(SamplerState, GBufferVelocityTextureSampler)
+#if ENGINE_MAJOR_VERSION >= 5
+		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, GBufferVelocityTextureSRV)
+#endif
 
 		SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture2D, StencilTexture)
 
 		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, ViewUniformBuffer)
 
 		// Temporal upsample specific parameters.
+#if ENGINE_MAJOR_VERSION < 5
 		SHADER_PARAMETER(FVector4, InputViewSize)
 		SHADER_PARAMETER(FVector2D, InputViewMin)
 		SHADER_PARAMETER(FVector2D, TemporalJitterPixels)
+#else
+		SHADER_PARAMETER(FVector4f, InputViewSize)
+		SHADER_PARAMETER(FVector2f, InputViewMin)
+		SHADER_PARAMETER(FVector2f, TemporalJitterPixels)
+#endif
 		SHADER_PARAMETER(float, ScreenPercentage)
 		SHADER_PARAMETER(float, UpscaleFactor)
 
@@ -770,11 +853,54 @@ class FTAAStandaloneNoBlendCS : public FGlobalShader
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(Texture2D, OutComputeTexDownsampled)
 
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, DebugOutput)
-		END_SHADER_PARAMETER_STRUCT()
+	END_SHADER_PARAMETER_STRUCT()
 
-		static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+#if ENGINE_MAJOR_VERSION >= 5
+	static FPermutationDomain RemapPermutation(FPermutationDomain PermutationVector)
+	{
+		if (PermutationVector.Get<FTAAPassConfigDim>() == ETAAPassConfig::Main ||
+			PermutationVector.Get<FTAAPassConfigDim>() == ETAAPassConfig::MainUpsampling)
+		{
+			// No point downsampling if not using the faster quality permutation already.
+			if (PermutationVector.Get<FTAAQualityDim>() == ETAAQuality::High)
+			{
+				PermutationVector.Set<FTAADownsampleDim>(false);
+			}
+		}
+		else if (
+			PermutationVector.Get<FTAAPassConfigDim>() == ETAAPassConfig::DiaphragmDOF ||
+			PermutationVector.Get<FTAAPassConfigDim>() == ETAAPassConfig::DiaphragmDOFUpsampling)
+		{
+			// DOF pass allow only quality 1 and 2
+			PermutationVector.Set<FTAAQualityDim>(ETAAQuality(FMath::Max(int(PermutationVector.Get<FTAAQualityDim>()), int(ETAAQuality::Medium))));
+
+			// Only the Main and Main Upsampling can downsample the output.
+			PermutationVector.Set<FTAADownsampleDim>(false);
+		}
+		else
+		{
+			// Only the Main and Main Upsampling have quality options 0, 1, 2.
+			PermutationVector.Set<FTAAQualityDim>(ETAAQuality::High);
+
+			// Only the Main and Main Upsampling can downsample the output.
+			PermutationVector.Set<FTAADownsampleDim>(false);
+		}
+
+		return PermutationVector;
+	}
+#endif
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 	{
 		FPermutationDomain PermutationVector(Parameters.PermutationId);
+
+#if ENGINE_MAJOR_VERSION >= 5
+		// Don't compile the shader permutation if gets remaped at runtime.
+		if (PermutationVector != RemapPermutation(PermutationVector))
+		{
+			return false;
+		}
+#endif
 
 		// Screen percentage dimension is only for upsampling permutation.
 		if (!IsTAAUpsamplingConfig(PermutationVector.Get<FTAAPassConfigDim>()) &&
@@ -790,7 +916,7 @@ class FTAAStandaloneNoBlendCS : public FGlobalShader
 			{
 				return false;
 			}
-
+#if ENGINE_MAJOR_VERSION < 5
 			// No point disabling filtering.
 			if (!PermutationVector.Get<FTAAUpsampleFilteredDim>())
 			{
@@ -802,8 +928,9 @@ class FTAAStandaloneNoBlendCS : public FGlobalShader
 			{
 				return false;
 			}
+#endif
 		}
-
+#if ENGINE_MAJOR_VERSION < 5
 		// No point disabling filtering if not using the fast permutation already.
 		if (!PermutationVector.Get<FTAAUpsampleFilteredDim>() &&
 			!PermutationVector.Get<FTAAFastDim>())
@@ -817,14 +944,14 @@ class FTAAStandaloneNoBlendCS : public FGlobalShader
 		{
 			return false;
 		}
-
+#endif
 		// Screen percentage range 3 is only for super sampling.
 		if (PermutationVector.Get<FTAAPassConfigDim>() != ETAAPassConfig::MainSuperSampling &&
 			PermutationVector.Get<FTAAScreenPercentageDim>() == 3)
 		{
 			return false;
 		}
-
+#if ENGINE_MAJOR_VERSION < 5
 		// Fast dimensions is only for Main and Diaphragm DOF.
 		if (PermutationVector.Get<FTAAFastDim>() &&
 			!IsMainTAAConfig(PermutationVector.Get<FTAAPassConfigDim>()) &&
@@ -846,7 +973,7 @@ class FTAAStandaloneNoBlendCS : public FGlobalShader
 		{
 			return false;
 		}
-
+#endif
 		//Only Main and MainUpsampling config without DownSample permutations are supported on mobile platform.
 		return SupportsGen4TAA(Parameters.Platform) && (!IsMobilePlatform(Parameters.Platform) || ((PermutationVector.Get<FTAAPassConfigDim>() == ETAAPassConfig::Main || PermutationVector.Get<FTAAPassConfigDim>() == ETAAPassConfig::MainUpsampling) && !PermutationVector.Get<FTAADownsampleDim>()));
 	}
@@ -856,14 +983,26 @@ class FTAAStandaloneNoBlendCS : public FGlobalShader
 		OutEnvironment.SetDefine(TEXT("THREADGROUP_SIZEX"), GTemporalAATileSizeX);
 		OutEnvironment.SetDefine(TEXT("THREADGROUP_SIZEY"), GTemporalAATileSizeY);
 
+#if ENGINE_MAJOR_VERSION >= 5
+		static FShaderPlatformCachedIniValue<bool> UseMobileConfig(TEXT("r.TemporalAA.UseMobileConfig"));
+		bool bUseMobileConfig = (UseMobileConfig.Get((EShaderPlatform)Parameters.Platform) != 0);
+#endif
 		bool bIsMobileTiledGPU = RHIHasTiledGPU(Parameters.Platform) || IsSimulatedPlatform(Parameters.Platform);
 
 		// There are some mobile specific shader optimizations need to be set in the shader, such as disable shared memory usage, disable stencil texture sampling.
+#if ENGINE_MAJOR_VERSION < 5
 		OutEnvironment.SetDefine(TEXT("AA_MOBILE_CONFIG"), bIsMobileTiledGPU ? 1 : 0);
+#else
+		OutEnvironment.SetDefine(TEXT("AA_MOBILE_CONFIG"), (bIsMobileTiledGPU || bUseMobileConfig) ? 1 : 0);
+#endif
 	}
 };
 
+#if ENGINE_MAJOR_VERSION < 5
 IMPLEMENT_GLOBAL_SHADER(FTAAStandaloneNoBlendCS, "/Plugin/XeSSCapture/Private/TAAStandalone_noblend.usf", "MainCS", SF_Compute);
+#else
+IMPLEMENT_GLOBAL_SHADER(FTAAStandaloneNoBlendCS, "/Plugin/XeSSCapture/Private/TAAStandalone_noblend_ue5.usf", "MainCS", SF_Compute);
+#endif
 
 static bool XeSSCapture_IsPostProcessingWithAlphaChannelSupported()
 {
@@ -871,12 +1010,21 @@ static bool XeSSCapture_IsPostProcessingWithAlphaChannelSupported()
 	return CVar->GetValueOnAnyThread() != 0;
 }
 
+#if ENGINE_MAJOR_VERSION < 5
 static EPostProcessAAQuality XeSSCapture_GetPostProcessAAQuality()
 {
 	static const auto CVar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.PostProcessAAQuality"));
 
-	return static_cast<EPostProcessAAQuality>(FMath::Clamp(CVar->GetValueOnAnyThread(), 0, static_cast<int32>(EPostProcessAAQuality::MAX) - 1));
+	return static_cast<EPostProcessAAQuality>(FMath::Clamp(CVar->GetValueOnRenderThread(), 0, static_cast<int32>(EPostProcessAAQuality::MAX) - 1));
 }
+#else
+static ETAAQuality XeSSCapture_GetPostProcessAAQuality()
+{
+	static const auto CVar = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.TemporalAA.Quality"));
+
+	return ETAAQuality(FMath::Clamp(CVar->GetValueOnRenderThread(), 0, 2));
+}
+#endif
 
 static float CatmullRom(float x)
 {
@@ -943,23 +1091,43 @@ static void SetupSampleWeightParameters(FTAAStandaloneNoBlendCS::FParameters* Ou
 
 			if (bCatmullRom)
 			{
+#if ENGINE_MAJOR_VERSION < 5
 				OutTAAParameters->SampleWeights[i] = CatmullRom(PixelOffsetX) * CatmullRom(PixelOffsetY);
 				TotalWeight += OutTAAParameters->SampleWeights[i];
+#else
+				const float CurrWeight = CatmullRom(PixelOffsetX) * CatmullRom(PixelOffsetY);
+				GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->SampleWeights, i) = CurrWeight;
+				TotalWeight += CurrWeight;
+#endif
 			}
 			else
 			{
+#if ENGINE_MAJOR_VERSION < 5
 				// Normal distribution, Sigma = 0.47
 				OutTAAParameters->SampleWeights[i] = FMath::Exp(-2.29f * (PixelOffsetX * PixelOffsetX + PixelOffsetY * PixelOffsetY));
 				TotalWeight += OutTAAParameters->SampleWeights[i];
+#else
+				// Normal distribution, Sigma = 0.47
+				const float CurrWeight = FMath::Exp(-2.29f * (PixelOffsetX * PixelOffsetX + PixelOffsetY * PixelOffsetY));
+				GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->SampleWeights, i) = CurrWeight;
+				TotalWeight += CurrWeight;
+#endif
 			}
 		}
 
 		for (int32 i = 0; i < 9; i++)
+		{
+#if ENGINE_MAJOR_VERSION < 5
 			OutTAAParameters->SampleWeights[i] /= TotalWeight;
+#else
+			GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->SampleWeights, i) /= TotalWeight;
+#endif
+		}
 	}
 
 	// Compute 3x3 + weights.
 	{
+#if ENGINE_MAJOR_VERSION < 5
 		OutTAAParameters->PlusWeights[0] = OutTAAParameters->SampleWeights[1];
 		OutTAAParameters->PlusWeights[1] = OutTAAParameters->SampleWeights[3];
 		OutTAAParameters->PlusWeights[2] = OutTAAParameters->SampleWeights[4];
@@ -974,6 +1142,24 @@ static void SetupSampleWeightParameters(FTAAStandaloneNoBlendCS::FParameters* Ou
 
 		for (int32 i = 0; i < 5; i++)
 			OutTAAParameters->PlusWeights[i] /= TotalWeightPlus;
+#else
+		GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->PlusWeights, 0) = GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->SampleWeights, 1);
+		GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->PlusWeights, 1) = GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->SampleWeights, 3);
+		GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->PlusWeights, 2) = GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->SampleWeights, 4);
+		GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->PlusWeights, 3) = GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->SampleWeights, 5);
+		GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->PlusWeights, 4) = GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->SampleWeights, 7);
+		float TotalWeightPlus = (
+			GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->SampleWeights, 1) +
+			GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->SampleWeights, 3) +
+			GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->SampleWeights, 4) +
+			GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->SampleWeights, 5) +
+			GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->SampleWeights, 7));
+
+		for (int32 i = 0; i < 5; i++)
+		{
+			GET_SCALAR_ARRAY_ELEMENT(OutTAAParameters->PlusWeights, i) /= TotalWeightPlus;
+		}
+#endif
 	}
 }
 
@@ -1034,7 +1220,11 @@ static FTAAOutputs AddSrTemporalAAPass(
 	{
 		EPixelFormat HistoryPixelFormat = PF_FloatRGBA;
 		static const auto TemporalAAR11G11B10History = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.TemporalAA.R11G11B10History"));
-		if (bIsMainPass && Inputs.bUseFast && !bSupportsAlpha && TemporalAAR11G11B10History->GetValueOnAnyThread())
+#if ENGINE_MAJOR_VERSION < 5
+		if (bIsMainPass && Inputs.bUseFast && !bSupportsAlpha && TemporalAAR11G11B10History->GetValueOnRenderThread())
+#else
+		if (bIsMainPass && Inputs.Quality != ETAAQuality::High && !bSupportsAlpha && TemporalAAR11G11B10History->GetValueOnRenderThread())
+#endif
 		{
 			HistoryPixelFormat = PF_FloatR11G11B10;
 		}
@@ -1089,15 +1279,23 @@ static FTAAOutputs AddSrTemporalAAPass(
 	{
 		FTAAStandaloneNoBlendCS::FPermutationDomain PermutationVector;
 		PermutationVector.Set<FTAAStandaloneNoBlendCS::FTAAPassConfigDim>(Inputs.Pass);
+#if ENGINE_MAJOR_VERSION < 5
 		PermutationVector.Set<FTAAStandaloneNoBlendCS::FTAAFastDim>(Inputs.bUseFast);
+#else
+		PermutationVector.Set<FTAAStandaloneNoBlendCS::FTAAQualityDim>(Inputs.Quality);
+#endif
 		PermutationVector.Set<FTAAStandaloneNoBlendCS::FTAADownsampleDim>(Inputs.bDownsample);
+#if ENGINE_MAJOR_VERSION < 5
 		PermutationVector.Set<FTAAStandaloneNoBlendCS::FTAAUpsampleFilteredDim>(true);
+#endif
 
 		if (IsTAAUpsamplingConfig(Inputs.Pass))
 		{
+#if ENGINE_MAJOR_VERSION < 5
 			static const auto TemporalAAUpsampleFiltered = IConsoleManager::Get().FindTConsoleVariableDataInt(TEXT("r.TemporalAAUpsampleFiltered"));
 			const bool bUpsampleFiltered = TemporalAAUpsampleFiltered->GetValueOnAnyThread() != 0 || Inputs.Pass != ETAAPassConfig::MainUpsampling;
 			PermutationVector.Set<FTAAStandaloneNoBlendCS::FTAAUpsampleFilteredDim>(bUpsampleFiltered);
+#endif
 
 			// If screen percentage > 100% on X or Y axes, then use screen percentage range = 2 shader permutation to disable LDS caching.
 			if (SrcRect.Width() > DestRect.Width() ||
@@ -1156,7 +1354,11 @@ static FTAAOutputs AddSrTemporalAAPass(
 
 		// Input buffer shader parameters
 		{
+#if ENGINE_MAJOR_VERSION < 5
 			PassParameters->InputSceneColorSize = FVector4(
+#else
+			PassParameters->InputSceneColorSize = FVector4f(
+#endif
 				InputExtent.X,
 				InputExtent.Y,
 				1.0f / float(InputExtent.X),
@@ -1169,10 +1371,22 @@ static FTAAOutputs AddSrTemporalAAPass(
 			PassParameters->InputSceneMetadataSampler = TStaticSamplerState<SF_Point>::GetRHI();
 		}
 
+#if ENGINE_MAJOR_VERSION < 5
 		PassParameters->OutputViewportSize = FVector4(
+#else
+		PassParameters->OutputViewportSize = FVector4f(
+#endif
 			PracticableDestRect.Width(), PracticableDestRect.Height(), 1.0f / float(PracticableDestRect.Width()), 1.0f / float(PracticableDestRect.Height()));
+#if ENGINE_MAJOR_VERSION < 5
 		PassParameters->OutputViewportRect = FVector4(PracticableDestRect.Min.X, PracticableDestRect.Min.Y, PracticableDestRect.Max.X, PracticableDestRect.Max.Y);
+#else
+		PassParameters->OutputViewportRect = FVector4f(PracticableDestRect.Min.X, PracticableDestRect.Min.Y, PracticableDestRect.Max.X, PracticableDestRect.Max.Y);
+#endif
+#if ENGINE_MAJOR_VERSION < 5
 		PassParameters->OutputQuantizationError = ComputePixelFormatQuantizationError(NewHistoryTexture[0]->Desc.Format);
+#else
+		PassParameters->OutputQuantizationError = (FVector3f)ComputePixelFormatQuantizationError(NewHistoryTexture[0]->Desc.Format);
+#endif
 
 		// Set history shader parameters.
 		{
@@ -1180,10 +1394,17 @@ static FTAAOutputs AddSrTemporalAAPass(
 
 			if (bCameraCut)
 			{
+#if ENGINE_MAJOR_VERSION < 5
 				PassParameters->ScreenPosToHistoryBufferUV = FVector4(1.0f, 1.0f, 1.0f, 1.0f);
 				PassParameters->ScreenPosAbsMax = FVector2D(0.0f, 0.0f);
 				PassParameters->HistoryBufferUVMinMax = FVector4(0.0f, 0.0f, 0.0f, 0.0f);
 				PassParameters->HistoryBufferSize = FVector4(1.0f, 1.0f, 1.0f, 1.0f);
+#else
+				PassParameters->ScreenPosToHistoryBufferUV = FVector4f(1.0f, 1.0f, 1.0f, 1.0f);
+				PassParameters->ScreenPosAbsMax = FVector2f(0.0f, 0.0f);
+				PassParameters->HistoryBufferUVMinMax = FVector4f(0.0f, 0.0f, 0.0f, 0.0f);
+				PassParameters->HistoryBufferSize = FVector4f(1.0f, 1.0f, 1.0f, 1.0f);
+#endif
 
 				for (int32 i = 0; i < FTemporalAAHistory::kRenderTargetCount; i++)
 				{
@@ -1202,7 +1423,11 @@ static FTAAOutputs AddSrTemporalAAPass(
 				float InvReferenceBufferSizeX = 1.f / float(InputHistory.ReferenceBufferSize.X);
 				float InvReferenceBufferSizeY = 1.f / float(InputHistory.ReferenceBufferSize.Y);
 
+#if ENGINE_MAJOR_VERSION < 5
 				PassParameters->ScreenPosToHistoryBufferUV = FVector4(
+#else
+				PassParameters->ScreenPosToHistoryBufferUV = FVector4f(
+#endif
 					ReferenceViewportExtent.X * 0.5f * InvReferenceBufferSizeX,
 					-ReferenceViewportExtent.Y * 0.5f * InvReferenceBufferSizeY,
 					(ReferenceViewportExtent.X * 0.5f + ReferenceViewportOffset.X) * InvReferenceBufferSizeX,
@@ -1212,18 +1437,30 @@ static FTAAOutputs AddSrTemporalAAPass(
 				FIntPoint ViewportExtent = FIntPoint::DivideAndRoundUp(ReferenceViewportExtent, Inputs.ResolutionDivisor);
 				FIntPoint BufferSize = ReferenceBufferSize / Inputs.ResolutionDivisor;
 
+#if ENGINE_MAJOR_VERSION < 5
 				PassParameters->ScreenPosAbsMax = FVector2D(1.0f - 1.0f / float(ViewportExtent.X), 1.0f - 1.0f / float(ViewportExtent.Y));
+#else
+				PassParameters->ScreenPosAbsMax = FVector2f(1.0f - 1.0f / float(ViewportExtent.X), 1.0f - 1.0f / float(ViewportExtent.Y));
+#endif
 
 				float InvBufferSizeX = 1.f / float(BufferSize.X);
 				float InvBufferSizeY = 1.f / float(BufferSize.Y);
 
+#if ENGINE_MAJOR_VERSION < 5
 				PassParameters->HistoryBufferUVMinMax = FVector4(
+#else
+				PassParameters->HistoryBufferUVMinMax = FVector4f(
+#endif
 					(ViewportOffset.X + 0.5f) * InvBufferSizeX,
 					(ViewportOffset.Y + 0.5f) * InvBufferSizeY,
 					(ViewportOffset.X + ViewportExtent.X - 0.5f) * InvBufferSizeX,
 					(ViewportOffset.Y + ViewportExtent.Y - 0.5f) * InvBufferSizeY);
 
+#if ENGINE_MAJOR_VERSION < 5
 				PassParameters->HistoryBufferSize = FVector4(BufferSize.X, BufferSize.Y, InvBufferSizeX, InvBufferSizeY);
+#else
+				PassParameters->HistoryBufferSize = FVector4f(BufferSize.X, BufferSize.Y, InvBufferSizeX, InvBufferSizeY);
+#endif
 
 				for (int32 i = 0; i < FTemporalAAHistory::kRenderTargetCount; i++)
 				{
@@ -1244,7 +1481,11 @@ static FTAAOutputs AddSrTemporalAAPass(
 			}
 		}
 
+#if ENGINE_MAJOR_VERSION < 5
 		PassParameters->MaxViewportUVAndSvPositionToViewportUV = FVector4(
+#else
+		PassParameters->MaxViewportUVAndSvPositionToViewportUV = FVector4f(
+#endif
 			(PracticableDestRect.Width() - 0.5f * ResDivisor) / float(PracticableDestRect.Width()),
 			(PracticableDestRect.Height() - 0.5f * ResDivisor) / float(PracticableDestRect.Height()),
 			ResDivisor / float(DestRect.Width()),
@@ -1255,16 +1496,28 @@ static FTAAOutputs AddSrTemporalAAPass(
 		{
 			float InvSizeX = 1.0f / float(InputExtent.X);
 			float InvSizeY = 1.0f / float(InputExtent.Y);
+#if ENGINE_MAJOR_VERSION < 5
 			PassParameters->ViewportUVToInputBufferUV = FVector4(
+#else
+			PassParameters->ViewportUVToInputBufferUV = FVector4f(
+#endif
 				ResDivisorInv * InputViewRect.Width() * InvSizeX,
 				ResDivisorInv * InputViewRect.Height() * InvSizeY,
 				ResDivisorInv * InputViewRect.Min.X * InvSizeX,
 				ResDivisorInv * InputViewRect.Min.Y * InvSizeY);
 		}
 
+#if ENGINE_MAJOR_VERSION >= 5
+		PassParameters->GBufferVelocityTextureSRV = GraphBuilder.CreateSRV(FRDGTextureSRVDesc::Create(PassParameters->GBufferVelocityTexture));
+#endif
+
 		if (View.GetFeatureLevel() <= ERHIFeatureLevel::ES3_1)
 		{
+#if ENGINE_MAJOR_VERSION < 5
 			PassParameters->EyeAdaptationBuffer = GetEyeAdaptationBuffer(View);
+#else
+			PassParameters->EyeAdaptationBuffer = GraphBuilder.CreateSRV(GetEyeAdaptationBuffer(GraphBuilder, View), PF_A32B32G32R32F);
+#endif
 		}
 		else
 		{
@@ -1277,11 +1530,20 @@ static FTAAOutputs AddSrTemporalAAPass(
 			float InputViewSizeInvScale = Inputs.ResolutionDivisor;
 			float InputViewSizeScale = 1.0f / InputViewSizeInvScale;
 
+#if ENGINE_MAJOR_VERSION < 5
 			PassParameters->TemporalJitterPixels = InputViewSizeScale * View.TemporalJitterPixels;
+#else
+			PassParameters->TemporalJitterPixels = InputViewSizeScale * FVector2f(View.TemporalJitterPixels);
+#endif
 			PassParameters->ScreenPercentage = float(InputViewRect.Width()) / float(OutputViewRect.Width());
 			PassParameters->UpscaleFactor = float(OutputViewRect.Width()) / float(InputViewRect.Width());
+#if ENGINE_MAJOR_VERSION < 5
 			PassParameters->InputViewMin = InputViewSizeScale * FVector2D(InputViewRect.Min.X, InputViewRect.Min.Y);
 			PassParameters->InputViewSize = FVector4(
+#else
+			PassParameters->InputViewMin = InputViewSizeScale * FVector2f(InputViewRect.Min.X, InputViewRect.Min.Y);
+			PassParameters->InputViewSize = FVector4f(
+#endif
 				InputViewSizeScale * InputViewRect.Width(), InputViewSizeScale * InputViewRect.Height(),
 				InputViewSizeInvScale / InputViewRect.Width(), InputViewSizeInvScale / InputViewRect.Height());
 		}
@@ -1319,6 +1581,7 @@ static FTAAOutputs AddSrTemporalAAPass(
 			bUseHistoryTexture[i] = PassParameters->HistoryBuffer[i] != nullptr;
 		}
 
+#if ENGINE_MAJOR_VERSION < 5
 		FComputeShaderUtils::AddPass(
 			GraphBuilder,
 			RDG_EVENT_NAME("TAA No Blend %s%s %dx%d -> %dx%d",
@@ -1328,6 +1591,44 @@ static FTAAOutputs AddSrTemporalAAPass(
 			ComputeShader,
 			PassParameters,
 			FComputeShaderUtils::GetGroupCount(PracticableDestRect.Size(), GTemporalAATileSizeX));
+#else
+		{
+			FIntVector GroupCount = FComputeShaderUtils::GetGroupCount(PracticableDestRect.Size(), GTemporalAATileSizeX);
+			FComputeShaderUtils::ValidateGroupCount(GroupCount);
+
+			const FShaderParametersMetadata* ParametersMetadata = FTAAStandaloneNoBlendCS::FParameters::FTypeInfo::GetStructMetadata();
+
+			GraphBuilder.AddPass(
+				RDG_EVENT_NAME("TAA(%s Quality=%s) %dx%d -> %dx%d",
+					PassName,
+					kTAAQualityNames[int32(PermutationVector.Get<FTAAStandaloneNoBlendCS::FTAAQualityDim>())],
+					PracticableSrcRect.Width(), PracticableSrcRect.Height(),
+					PracticableDestRect.Width(), PracticableDestRect.Height()),
+				ParametersMetadata,
+				PassParameters,
+				ERDGPassFlags::Compute,
+				[ParametersMetadata, PassParameters, ComputeShader, GroupCount](FRHIComputeCommandList& RHICmdList)
+				{
+#if WITH_MGPU
+					RHICmdList.WaitForTemporalEffect(TAAEffectName);
+#endif  // WITH_MGPU
+
+					FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, ParametersMetadata, *PassParameters, GroupCount);
+
+#if WITH_MGPU
+					TArray<FRHITexture*, TFixedAllocator<2>> OutputTexturesRHI;
+					OutputTexturesRHI.Add(PassParameters->OutComputeTex[0]->GetParentRHI());
+					if (PassParameters->OutComputeTexDownsampled)
+					{
+						OutputTexturesRHI.Add(PassParameters->OutComputeTexDownsampled->GetParentRHI());
+					}
+
+					RHICmdList.BroadcastTemporalEffect(
+						TAAEffectName, MakeArrayView(OutputTexturesRHI.GetData(), OutputTexturesRHI.Num()));
+#endif  // WITH_MGPU
+				});
+		}
+#endif
 	}
 
 	if (!View.bStatePrevViewInfoIsReadOnly)
@@ -1369,10 +1670,13 @@ static void AddSrMainTemporalAAPasses(
 
 	TAAParameters.SetupViewRect(View);
 
+#if ENGINE_MAJOR_VERSION < 5
 	const EPostProcessAAQuality LowQualityTemporalAA = EPostProcessAAQuality::Medium;
 
 	TAAParameters.bUseFast = XeSSCapture_GetPostProcessAAQuality() == LowQualityTemporalAA;
-
+#else
+	TAAParameters.Quality = XeSSCapture_GetPostProcessAAQuality();
+#endif
 	const FIntRect SecondaryViewRect = TAAParameters.OutputViewRect;
 
 	const float HistoryUpscaleFactor = GetTemporalAAHistoryUpscaleFactor(View);
@@ -1400,7 +1704,11 @@ static void AddSrMainTemporalAAPasses(
 
 	TAAParameters.DownsampleOverrideFormat = PassInputs.DownsampleOverrideFormat;
 
+#if ENGINE_MAJOR_VERSION < 5
 	TAAParameters.bDownsample = PassInputs.bAllowDownsampleSceneColor && TAAParameters.bUseFast;
+#else
+	TAAParameters.bDownsample = (PassInputs.bGenerateSceneColorHalfRes || PassInputs.bGenerateSceneColorQuarterRes) && TAAParameters.Quality != ETAAQuality::High;
+#endif
 
 	TAAParameters.SceneDepthTexture = PassInputs.SceneDepthTexture;
 	TAAParameters.SceneVelocityTexture = PassInputs.SceneVelocityTexture;
@@ -1455,7 +1763,7 @@ void FXeSSCaptureTemporalUpscaler::AddPasses(
 	FRDGTextureRef* OutSceneColorHalfResTexture,
 	FIntRect* OutSceneColorHalfResViewRect) const
 #else
-ITemporalUpscaler::FOutputs FXeSSVelocityTemporalUpscaler::AddPasses(
+ITemporalUpscaler::FOutputs FXeSSCaptureTemporalUpscaler::AddPasses(
 	FRDGBuilder& GraphBuilder,
 	const FViewInfo& View,
 	const FPassInputs& PassInputs) const
@@ -1550,17 +1858,12 @@ void FXeSSCaptureNoBlenderUpscaler::AddPasses(
 	FRDGTextureRef* OutSceneColorHalfResTexture,
 	FIntRect* OutSceneColorHalfResViewRect) const
 #else
-ITemporalUpscaler::FOutputs FXeSSVelocityTemporalUpscaler::AddPasses(
+ITemporalUpscaler::FOutputs FXeSSCaptureNoBlenderUpscaler::AddPasses(
 	FRDGBuilder& GraphBuilder,
 	const FViewInfo& View,
 	const FPassInputs& PassInputs) const
 #endif
 {
-#if ENGINE_MAJOR_VERSION < 5
-#else
-	ITemporalUpscaler::FOutputs Outputs{};
-#endif
-
 	FIntRect SecondaryViewRect;
 	SecondaryViewRect.Min = FIntPoint(0, 0);
 	SecondaryViewRect.Max = View.GetSecondaryViewRectSize();
@@ -1576,18 +1879,23 @@ ITemporalUpscaler::FOutputs FXeSSVelocityTemporalUpscaler::AddPasses(
 	}
 
 	// sr
+#if ENGINE_MAJOR_VERSION < 5
 	AddSrMainTemporalAAPasses(GraphBuilder, View, PassInputs, OutSceneColorTexture, OutSceneColorViewRect, OutSceneColorHalfResTexture, OutSceneColorHalfResViewRect);
+#else
+	ITemporalUpscaler::FOutputs Outputs;
+	AddSrMainTemporalAAPasses(GraphBuilder, View, PassInputs, &Outputs.FullRes.Texture, &Outputs.FullRes.ViewRect, &Outputs.HalfRes.Texture, &Outputs.HalfRes.ViewRect);
+#endif
 	if (FrameIndex->GetValueOnRenderThread() >= 0)
 	{
+#if ENGINE_MAJOR_VERSION < 5
 		FScreenPassTexture SceneSr(*OutSceneColorTexture, SecondaryViewRect);
+#else
+		FScreenPassTexture SceneSr(Outputs.FullRes.Texture, SecondaryViewRect);
+#endif
 		AddDumpToExrPass(GraphBuilder, SceneSr, FString::Printf(TEXT("%s\\%s\\sr\\%d\\sr_%d.exr"), *OutputDirectory->GetString(), *DateTime->GetString(), FrameIndex->GetValueOnRenderThread(), SampleIndex->GetValueOnRenderThread()));
 	}
 
-#if ENGINE_MAJOR_VERSION < 5
-#else
-	Outputs.FullRes.Texture = *OutSceneColorTexture;
-	Outputs.FullRes.ViewRect = SecondaryViewRect;
-
+#if ENGINE_MAJOR_VERSION >= 5
 	return Outputs;
 #endif
 }

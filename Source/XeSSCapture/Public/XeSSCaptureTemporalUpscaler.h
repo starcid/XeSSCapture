@@ -32,12 +32,27 @@ public:
 
 	virtual float GetMinUpsampleResolutionFraction() const override
 	{
+#if ENGINE_MAJOR_VERSION < 5
 		return FSceneViewScreenPercentageConfig::kMinTAAUpsampleResolutionFraction;
+#else
+		return ISceneViewFamilyScreenPercentage::kMinTAAUpsampleResolutionFraction;
+#endif
 	}
 	virtual float GetMaxUpsampleResolutionFraction() const override
 	{
+#if ENGINE_MAJOR_VERSION < 5
 		return FSceneViewScreenPercentageConfig::kMaxTAAUpsampleResolutionFraction;
+#else
+		return ISceneViewFamilyScreenPercentage::kMaxTAAUpsampleResolutionFraction;
+#endif
 	}
+
+#if ENGINE_MAJOR_VERSION >= 5
+	virtual ITemporalUpscaler* Fork_GameThread(const class FSceneViewFamily& ViewFamily) const override
+	{
+		return new FXeSSCaptureTemporalUpscaler;
+	}
+#endif
 };
 
 class FXeSSCaptureNoBlenderUpscaler final : public ITemporalUpscaler
@@ -69,10 +84,25 @@ public:
 
 	virtual float GetMinUpsampleResolutionFraction() const override
 	{
+#if ENGINE_MAJOR_VERSION < 5
 		return FSceneViewScreenPercentageConfig::kMinTAAUpsampleResolutionFraction;
+#else
+		return ISceneViewFamilyScreenPercentage::kMinTAAUpsampleResolutionFraction;
+#endif
 	}
 	virtual float GetMaxUpsampleResolutionFraction() const override
 	{
+#if ENGINE_MAJOR_VERSION < 5
 		return FSceneViewScreenPercentageConfig::kMaxTAAUpsampleResolutionFraction;
+#else
+		return ISceneViewFamilyScreenPercentage::kMaxTAAUpsampleResolutionFraction;
+#endif
 	}
+
+#if ENGINE_MAJOR_VERSION >= 5
+	virtual ITemporalUpscaler* Fork_GameThread(const class FSceneViewFamily& ViewFamily) const override
+	{
+		return new FXeSSCaptureNoBlenderUpscaler;
+	}
+#endif
 };

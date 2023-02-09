@@ -41,7 +41,11 @@ static void CaptureSample(UTextureRenderTarget2D* CaptureRenderTexture, FIntPoin
 
 	FSceneViewInitOptions ViewInitOptions;
 
+#if ENGINE_MAJOR_VERSION < 5
 	if (!LP->CalcSceneViewInitOptions(ViewInitOptions, LP->ViewportClient->Viewport, nullptr, eSSP_FULL))
+#else
+	if (!LP->CalcSceneViewInitOptions(ViewInitOptions, LP->ViewportClient->Viewport))
+#endif
 	{
 		return;
 	}
@@ -90,7 +94,11 @@ void XeSSCaptureSR::Capture()
 
 	// get the projection data
 	FSceneViewProjectionData ProjectionData;
+#if ENGINE_MAJOR_VERSION < 5
 	if (!LP->GetProjectionData(LP->ViewportClient->Viewport, eSSP_FULL, /*out*/ ProjectionData))
+#else
+	if (!LP->GetProjectionData(LP->ViewportClient->Viewport, ProjectionData))
+#endif
 		return;
 
 #if WITH_EDITOR

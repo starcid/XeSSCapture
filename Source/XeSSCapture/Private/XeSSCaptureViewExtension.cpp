@@ -16,6 +16,9 @@ void FXeSSCaptureViewExtension::SetupView(FSceneViewFamily& InViewFamily, FScene
 
 	if (m_bActive)
 	{
+		if (m_bHaveSetView)
+			return;
+
 		if (!m_bCaptureSR)
 		{
 			// 32 samples
@@ -43,6 +46,7 @@ void FXeSSCaptureViewExtension::SetupView(FSceneViewFamily& InViewFamily, FScene
 			viewState->TemporalAASampleIndex = SampleIndex->GetValueOnGameThread() - 1;
 			viewState->FrameIndex = SampleIndex->GetValueOnGameThread() - 1;
 		}
+		m_bHaveSetView = true;
 	}
 	else
 	{
@@ -67,6 +71,7 @@ void FXeSSCaptureViewExtension::SetupViewFamily(FSceneViewFamily& InViewFamily)
 		InViewFamily.EngineShowFlags.Particles = 0;
 		InViewFamily.EngineShowFlags.Fog = 0;
 		InViewFamily.EngineShowFlags.VolumetricFog = 0;
+		m_bHaveSetView = false;
 	}
 }
 
@@ -74,7 +79,13 @@ void FXeSSCaptureViewExtension::BeginRenderViewFamily(FSceneViewFamily& InViewFa
 {
 	if (m_bActive)
 	{
+#if ENGINE_MAJOR_VERSION < 5
 		GTemporalUpscaler = m_bCaptureSR ? (ITemporalUpscaler*)&m_CaptureNoBlenderUpscaler : (ITemporalUpscaler*)&m_CaptureTemporalUpscaler;
+#endif
+#if ENGINE_MAJOR_VERSION < 5
 		InViewFamily.SetTemporalUpscalerInterface(m_bCaptureSR ? (ITemporalUpscaler*)&m_CaptureNoBlenderUpscaler : (ITemporalUpscaler*)&m_CaptureTemporalUpscaler);
+#else
+		InViewFamily.SetTemporalUpscalerInterface(m_bCaptureSR ? m_CaptureNoBlenderUpscaler.Fork_GameThread(InViewFamily) : m_CaptureTemporalUpscaler.Fork_GameThread(InViewFamily));
+#endif
 	}
 }
