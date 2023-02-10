@@ -262,6 +262,7 @@ void FXeSSCaptureModule::OnEndFrame()
 {
 	if (PXeSSCaptureViewExtension->IsActive())
 	{
+		FlushRenderingCommands();
 		PXeSSCaptureViewExtension->SetCaptureSR(true);
 		XeSSCaptureSR::Capture();
 		PXeSSCaptureViewExtension->SetCaptureSR(false);
