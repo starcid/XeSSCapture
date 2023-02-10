@@ -7,7 +7,8 @@ public class XeSSCapture : ModuleRules
 	public XeSSCapture(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
-		
+		PrecompileForTargets = PrecompileTargetsType.Any;
+
 		PublicIncludePaths.AddRange(
 			new string[] {
 				// ... add public include paths required here ...
@@ -35,7 +36,6 @@ public class XeSSCapture : ModuleRules
 				"Projects",
 				"ImageWrapper", "RHI", "RenderCore",
 				"ImageWriteQueue",
-				"EditorStyle"
 				// ... add other public dependencies that you statically link with here ...
 			}
 			);
@@ -67,6 +67,7 @@ public class XeSSCapture : ModuleRules
 			//@TODO: Needed for the triangulation code used for sprites (but only in editor mode)
 			//@TOOD: Try to move the code dependent on the triangulation code to the editor-only module
 			PrivateDependencyModuleNames.Add("UnrealEd");
+			PrivateDependencyModuleNames.Add("EditorStyle");
 		}
 	}
 }

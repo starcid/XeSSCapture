@@ -101,11 +101,11 @@ void XeSSCaptureSR::Capture()
 #endif
 		return;
 
-#if WITH_EDITOR
+//#if WITH_EDITOR
 	FIntPoint TargetSize = ProjectionData.GetConstrainedViewRect().Size();
-#else
-	FIntPoint TargetSize = FIntPoint(GSystemResolution.ResX, GSystemResolution.ResY);
-#endif
+//#else
+//	FIntPoint TargetSize = FIntPoint(GSystemResolution.ResX, GSystemResolution.ResY);
+//#endif
 
 	UTextureRenderTarget2D* CaptureRenderTexture = NewObject<UTextureRenderTarget2D>();
 	CaptureRenderTexture->AddToRoot();

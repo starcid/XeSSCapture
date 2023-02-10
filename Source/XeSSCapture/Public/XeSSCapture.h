@@ -7,6 +7,7 @@
 
 DECLARE_LOG_CATEGORY_EXTERN(LogXeSSCapture, Log, All);
 
+class ITemporalUpscaler;
 class FXeSSCaptureViewExtension;
 class FXeSSCaptureModule : public IModuleInterface
 {

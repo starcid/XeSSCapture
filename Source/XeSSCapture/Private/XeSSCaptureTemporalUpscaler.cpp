@@ -849,8 +849,13 @@ class FTAAStandaloneNoBlendCS : public FGlobalShader
 		SHADER_PARAMETER(float, ScreenPercentage)
 		SHADER_PARAMETER(float, UpscaleFactor)
 
+#if ENGINE_MAJOR_VERSION < 5
 		SHADER_PARAMETER_RDG_TEXTURE_UAV_ARRAY(Texture2D, OutComputeTex, [FTemporalAAHistory::kRenderTargetCount])
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(Texture2D, OutComputeTexDownsampled)
+#else
+		SHADER_PARAMETER_RDG_TEXTURE_UAV_ARRAY(RWTexture2D, OutComputeTex, [FTemporalAAHistory::kRenderTargetCount])
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, OutComputeTexDownsampled)
+#endif
 
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D, DebugOutput)
 	END_SHADER_PARAMETER_STRUCT()
