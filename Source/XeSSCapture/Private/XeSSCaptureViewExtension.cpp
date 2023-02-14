@@ -69,8 +69,11 @@ void FXeSSCaptureViewExtension::SetupViewFamily(FSceneViewFamily& InViewFamily)
 	if (m_bActive)
 	{
 		InViewFamily.EngineShowFlags.Particles = 0;
-		InViewFamily.EngineShowFlags.Fog = 0;
-		InViewFamily.EngineShowFlags.VolumetricFog = 0;
+		/*
+			keep below or the atmosphere will be wrong
+		*/
+		//InViewFamily.EngineShowFlags.Fog = 0;
+		//InViewFamily.EngineShowFlags.VolumetricFog = 0;
 		m_bHaveSetView = false;
 	}
 }

@@ -211,12 +211,15 @@ void FXeSSCaptureModule::OnBeginFrame()
 				OverrideCommands(TEXT("r.ViewTextureMipBias.Offset"), -1);
 				OverrideCommands(TEXT("ShowFlag.Particles"), 0);
 				OverrideCommands(TEXT("r.LightShaftQuality"), 0);
-				OverrideCommands(TEXT("r.Fog"), 0);
-				OverrideCommands(TEXT("r.VolumetricFog"), 0);
+				/*
+					keep below or the atmosphere will be wrong
+				*/
+				//OverrideCommands(TEXT("r.Fog"), 0);
+				//OverrideCommands(TEXT("r.VolumetricFog"), 0);
+				//OverrideCommands(TEXT("ShowFlag.Fog"), 0);
+				//OverrideCommands(TEXT("ShowFlag.VolumetricFog"), 0);
+				//OverrideCommands(TEXT("ShowFlag.AtmosphericFog"), 0);
 				OverrideCommands(TEXT("r.DepthOfFieldQuality"), 0);
-				OverrideCommands(TEXT("ShowFlag.Fog"), 0);
-				OverrideCommands(TEXT("ShowFlag.VolumetricFog"), 0);
-				OverrideCommands(TEXT("ShowFlag.AtmosphericFog"), 0);
 				OverrideCommands(TEXT("r.MaxAnisotropy"), 16);
 				OverrideCommands(TEXT("r.TemporalAACurrentFrameWeight"), 1);
 				OverrideCommands(TEXT("r.NGX.DLSS.Enable"), 0);
